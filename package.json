@@ -1,0 +1,18 @@
+{
+  "name": "personal-agent",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Personal WhatsApp AI Agent — free stack (Baileys + Gemini + Next.js + Supabase)",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:agent": "npm run dev --workspace=apps/agent",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "build": "npm run build --workspaces"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

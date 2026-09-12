@@ -1,0 +1,55 @@
+// Supabase Postgres (free tier). Render ki disk ephemeral hai,
+// isliye session + reminders sab yahi rahega.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  createdAt    DateTime @default(now())
+  // single-user MVP: ek hi row, password hash
+  passwordHash String?
+}
+
+model WhatsappSession {
+  id        String   @id @default("default")
+  userId    String?  @default("owner")
+  authBlob  Json?    // Baileys creds + keys (file auth ka backup)
+  status    String   @default("disconnected") // qr | connected | disconnected
+  qr        String?  // last QR string (web pe dikhane ke liye)
+  updatedAt DateTime @updatedAt
+}
+
+model Setting {
+  userId      String @id @default("owner")
+  ownerNumber String @default("917761815151")
+  updatedAt   DateTime @updatedAt
+}
+
+model Message {
+  id         String   @id @default(cuid())
+  fromNumber String
+  body       String
+  reply      String?
+  isOwner    Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([fromNumber, createdAt])
+}
+
+model Reminder {
+  id        String   @id @default(cuid())
+  title     String
+  remindAt  DateTime
+  sent      Boolean  @default(false)
+  source    String   @default("custom") // custom | leetcode
+  createdAt DateTime @default(now())
+
+  @@index([sent, remindAt])
+}
