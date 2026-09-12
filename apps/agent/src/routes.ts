@@ -24,7 +24,12 @@ export function buildRoutes() {
   app.get("/health", (_req, res) => res.json({ ok: true, status: state.status }));
 
   app.get("/status", (_req, res) =>
-    res.json({ status: state.status, connected: state.status === "connected" })
+    res.json({
+      status: state.status,
+      connected: state.status === "connected",
+      wsOpen: (state.sock as any)?.ws?.readyState === 1,
+      lastClose: state.lastClose,
+    })
   );
 
   // QR string + dataURL (dashboard <img> me dikhane ke liye)

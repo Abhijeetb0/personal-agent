@@ -21,6 +21,7 @@ export const state = {
   lastQrAt: 0,
   pairingCode: null as string | null,
   pairingCodeAt: 0,
+  lastClose: null as { code: unknown; detail: string; at: number } | null,
 };
 
 // Agent wala SIM number (sirf digits, bina + ke). Pairing code isi pe ayega.
@@ -31,15 +32,27 @@ export function getAgentNumber(): string {
 // QR scan fail ho to ye code phone me type karo:
 // WhatsApp → Linked Devices → Link a Device → "Link with phone number instead"
 export async function requestPairingCode(number?: string): Promise<string> {
-  if (!state.sock) throw new Error("Socket ready nahi — 10 sec ruk ke retry karo");
   if (state.status === "connected") throw new Error("Pehle se connected hai");
   const num = (number || getAgentNumber()).replace(/[^0-9]/g, "");
   if (num.length < 10) throw new Error("Agent SIM ka poora number dalo (bina + ke, jaise 91XXXXXXXXXX)");
-  const code = await state.sock.requestPairingCode(num);
-  state.pairingCode = code;
-  state.pairingCodeAt = Date.now();
-  console.log(`[wa] pairing code: ${code} (1-2 min me phone me dalo)`);
-  return code;
+  // Socket open hone ka wait (max ~20 sec) — band socket pe code nahi banta
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) {
+    if (state.status === "connected") throw new Error("Pehle se connected hai");
+    const open = (state.sock as any)?.ws?.readyState === 1;
+    if (state.sock && open) break;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  if (!state.sock) throw new Error("Socket ready nahi — Render logs me [wa] lines check karo");
+  try {
+    const code = await state.sock.requestPairingCode(num);
+    state.pairingCode = code;
+    state.pairingCodeAt = Date.now();
+    console.log(`[wa] pairing code: ${code} (1-2 min me phone me dalo)`);
+    return code;
+  } catch (e) {
+    throw new Error(`WhatsApp connection unstable hai (${(e as Error).message}) — 15 sec ruk ke fir try karo`);
+  }
 }
 
 export async function startWhatsApp() {
@@ -87,6 +100,7 @@ export async function startWhatsApp() {
       console.log("[wa] Connection closed, code:", code, "loggedOut:", loggedOut, "detail:", err?.message || err);
       if (myGen !== generation) return;
       state.status = "disconnected";
+      state.lastClose = { code, detail: String(err?.message || err || ""), at: Date.now() };
       await setStatus("disconnected");
       if (!loggedOut) {
         console.log("[wa] 5 sec me reconnect...");
