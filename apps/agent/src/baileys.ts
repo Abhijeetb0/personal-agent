@@ -74,7 +74,6 @@ export async function startWhatsApp() {
   const sock = makeWASocket({
     version,
     auth: authState,
-    printQRInTerminal: true, // Render logs me bhi QR dikhega
     browser: ["PersonalAgent", "Chrome", "1.0"],
     syncFullHistory: false,
   });
