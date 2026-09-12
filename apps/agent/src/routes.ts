@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import QRCode from "qrcode";
 import { createClient } from "@supabase/supabase-js";
-import { state, sendWhatsAppMessage } from "./baileys.js";
+import { state, sendWhatsAppMessage, resetSession } from "./baileys.js";
 import { nextLeetCodeContest, formatIST } from "./leetcode.js";
 
 export function buildRoutes() {
@@ -41,6 +41,16 @@ export function buildRoutes() {
       if (!to || !text) return res.status(400).json({ error: "to + text chahiye" });
       const jid = to.includes("@") ? to : `${to}@s.whatsapp.net`;
       await sendWhatsAppMessage(jid, text);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  // Dashboard: "Naya QR" — aadha-fasa session saaf karke fresh pairing shuru karo
+  app.post("/reset", async (_req, res) => {
+    try {
+      await resetSession();
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });

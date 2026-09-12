@@ -58,3 +58,10 @@ export async function setStatus(status: string, qr?: string) {
     await supabase.from("WhatsappSession").upsert({ id: "default", status, qr: qr ?? null });
   } catch {}
 }
+
+export async function clearSupabaseSession() {
+  if (!supabase) return;
+  try {
+    await supabase.from("WhatsappSession").upsert({ id: "default", authBlob: {}, status: "disconnected", qr: null });
+  } catch {}
+}

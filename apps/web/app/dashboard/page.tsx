@@ -31,7 +31,6 @@ export default function Dashboard() {
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
   }, []);
-
   async function sendTest() {
     setMsg("bhej rahe...");
     const r = await fetch("/api/agent-send", {
@@ -40,6 +39,16 @@ export default function Dashboard() {
       body: JSON.stringify({ to, text }),
     });
     setMsg(r.ok ? "Bhej diya! WhatsApp check karo." : "Fail: pehle connect karo");
+  }
+
+  const [resetting, setResetting] = useState(false);
+  async function newQr() {
+    setResetting(true);
+    await fetch("/api/agent-reset", { method: "POST" });
+    setTimeout(() => {
+      setResetting(false);
+      load();
+    }, 6000);
   }
 
   return (
@@ -58,6 +67,16 @@ export default function Dashboard() {
       ) : (
         <p style={{ opacity: 0.7 }}>QR ka wait ho raha hai... agent Render/local pe chal raha hona chahiye.</p>
       )}
+
+      <hr style={{ margin: "28px 0", opacity: 0.2 }} />
+      <h2>QR kaam na kare to</h2>
+      <p style={{ opacity: 0.7, fontSize: 13 }}>
+        “Couldn't link device” aaye to pehle WhatsApp app update karo, fir neeche dabao aur fresh QR ko 30 sec ke andar scan karo.
+      </p>
+      <button onClick={newQr} disabled={resetting}
+        style={{ padding: "10px 16px", borderRadius: 8, cursor: "pointer" }}>
+        {resetting ? "Naya QR ban raha hai..." : "Naya QR lo"}
+      </button>
 
       <hr style={{ margin: "28px 0", opacity: 0.2 }} />
       <h2>Test message</h2>
