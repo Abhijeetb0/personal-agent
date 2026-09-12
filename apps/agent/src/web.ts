@@ -3,6 +3,16 @@
 
 export type SearchHit = { title: string; snippet: string; url: string };
 
+const JUNK_DOMAINS = [
+  "instagram.", "facebook.", "tiktok.", "pinterest.", "threads.",
+  "wordhippo.", "translate.google",
+];
+
+export function isJunkUrl(url: string): boolean {
+  const u = url.toLowerCase();
+  return JUNK_DOMAINS.some((d) => u.includes(d));
+}
+
 function decodeEntities(s: string): string {
   return s
     .replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").replace(/&amp;/g, "&")
@@ -40,17 +50,20 @@ export async function ddgSearch(query: string, max = 4): Promise<SearchHit[]> {
       if (html.includes("anomaly")) continue;
       const hits: SearchHit[] = [];
       let m: RegExpExecArray | null;
-      while ((m = a.re.exec(html)) && hits.length < max) {
+      while ((m = a.re.exec(html)) && hits.length < max + 3) {
         let url = m[1];
         const ud = url.match(/[?&]uddg=([^&]+)/);
         if (ud) url = decodeURIComponent(ud[1]);
+        if (url.startsWith("//")) url = "https:" + url;
+        if (isJunkUrl(url)) continue; // instagram/translate-junk bahar
         hits.push({
           title: decodeEntities(m[2]).slice(0, 120),
           snippet: decodeEntities(m[3]).slice(0, 220),
-          url: url.startsWith("//") ? "https:" + url : url,
+          url,
         });
+        if (hits.length >= max) break;
       }
-      if (hits.length > 0) return hits;
+      if (hits.length > 0) return hits.slice(0, max);
     } catch (e) {
       console.error("[web] search fail:", (e as Error).message);
     }

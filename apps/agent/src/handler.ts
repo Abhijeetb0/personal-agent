@@ -3,6 +3,7 @@ import { extractText, senderNumber } from "./handler.utils.js";
 import { isOwner } from "./whitelist.js";
 import { getAiReply } from "./ai.js";
 import { logMessage, recentHistory } from "./db.js";
+import { tryFastLane } from "./fastlane.js";
 import { ddgSearch, looksFactual } from "./web.js";
 
 export async function handleIncomingMessage(sock: WASocket, m: WAMessage) {
@@ -18,8 +19,22 @@ export async function handleIncomingMessage(sock: WASocket, m: WAMessage) {
     return;
   }
 
-  // 2. Brain: samjho -> tool chahiye to chalao -> jawab do
+  // 2. Fast-lane: pakke sawal (time/explicit-contest) bina AI ke.
+  // Ambiguous ("uske/iske") ya complex sab brain samjhega.
   try {
+    const fast = await tryFastLane(text);
+    if (fast) {
+      await sock.sendMessage(m.key.remoteJid!, { text: fast });
+      await logMessage(from, text, fast, true);
+      return;
+    }
+  } catch (e) {
+    console.error("[fastlane] fail:", (e as Error).message);
+  }
+
+  // 3. Brain: samjho -> tool chahiye to chalao -> jawab do
+  try {
+    console.log(`[msg] brain soch raha...`);
     const history = await recentHistory(from);
     const reply = await getAiReply(text, history);
     console.log(`[msg] reply ready (${reply.length} chars), bhej rahe...`);
