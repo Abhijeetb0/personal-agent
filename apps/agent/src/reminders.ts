@@ -38,6 +38,16 @@ function relativeMinutes(text: string): number | null {
 
 const REMINDER_WORDS = /(remind|reminder|yaad\s*dila|alarm|notify|contest\s*se)/i;
 
+// "next leetcode contest kab hai?" — real API date batao (AI andaza na lagaye)
+export async function tryAnswerContestQuery(text: string): Promise<string | null> {
+  if (!/contest/i.test(text)) return null;
+  if (!/(kab|when|next|agla|aglaa|date|time|bata|konsa|kaun)/i.test(text)) return null;
+  if (REMINDER_WORDS.test(text)) return null; // ye reminder command hai, info nahi
+  const contest = await nextLeetCodeContest();
+  if (!contest) return "LeetCode contest list abhi nahi mil payi. Thodi der me fir pucho.";
+  return `Next LeetCode contest: ${contest.name}\n${formatIST(contest.startAt)} (IST) ko hai.\nChaho to bolo "is se 30 min pehle remind kar" — yaad dila dunga!`;
+}
+
 export async function tryHandleReminderCommand(text: string): Promise<string | null> {
   if (!REMINDER_WORDS.test(text)) return null;
   const low = text.toLowerCase();

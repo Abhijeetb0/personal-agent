@@ -74,7 +74,9 @@ export async function startWhatsApp() {
   const sock = makeWASocket({
     version,
     auth: authState,
-    browser: ["PersonalAgent", "Chrome", "1.0"],
+    // Standard Chrome fingerprint — custom label/version se WhatsApp
+    // pairing reject kar deta hai (companion_platform_display check).
+    browser: ["Ubuntu", "Chrome", "120.0.0.0"],
     syncFullHistory: false,
   });
   state.sock = sock;
