@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import QRCode from "qrcode";
 import { createClient } from "@supabase/supabase-js";
-import { state, sendWhatsAppMessage, resetSession } from "./baileys.js";
+import { state, sendWhatsAppMessage, resetSession, requestPairingCode, getAgentNumber } from "./baileys.js";
 import { nextLeetCodeContest, formatIST } from "./leetcode.js";
 
 export function buildRoutes() {
@@ -55,6 +55,25 @@ export function buildRoutes() {
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }
+  });
+
+  // Pairing code: QR ki jagah phone me 8-digit code type karo
+  app.post("/pairing-code", async (_req, res) => {
+    try {
+      const code = await requestPairingCode();
+      res.json({ ok: true, code });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  app.get("/pairing-code", (_req, res) => {
+    res.json({
+      code: state.pairingCode,
+      ageSec: state.pairingCodeAt ? Math.round((Date.now() - state.pairingCodeAt) / 1000) : null,
+      agentNumberSet: getAgentNumber().length >= 10,
+      status: state.status,
+    });
   });
 
   const sb = () => {

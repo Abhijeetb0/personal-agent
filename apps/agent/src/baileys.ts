@@ -19,7 +19,28 @@ export const state = {
   status: "disconnected" as "qr" | "connected" | "disconnected",
   lastQr: null as string | null,
   lastQrAt: 0,
+  pairingCode: null as string | null,
+  pairingCodeAt: 0,
 };
+
+// Agent wala SIM number (sirf digits, bina + ke). Pairing code isi pe ayega.
+export function getAgentNumber(): string {
+  return (process.env.AGENT_NUMBER || "").replace(/[^0-9]/g, "");
+}
+
+// QR scan fail ho to ye code phone me type karo:
+// WhatsApp → Linked Devices → Link a Device → "Link with phone number instead"
+export async function requestPairingCode(): Promise<string> {
+  if (!state.sock) throw new Error("Socket ready nahi — 10 sec ruk ke retry karo");
+  if (state.status === "connected") throw new Error("Pehle se connected hai");
+  const num = getAgentNumber();
+  if (num.length < 10) throw new Error("AGENT_NUMBER env me agent SIM ka poora number dalo (bina + ke)");
+  const code = await state.sock.requestPairingCode(num);
+  state.pairingCode = code;
+  state.pairingCodeAt = Date.now();
+  console.log(`[wa] pairing code: ${code} (1-2 min me phone me dalo)`);
+  return code;
+}
 
 export async function startWhatsApp() {
   const myGen = ++generation;
@@ -60,9 +81,10 @@ export async function startWhatsApp() {
       await saveAuthToSupabase(AUTH_DIR, "connected");
     }
     if (connection === "close") {
-      const code = (lastDisconnect?.error as any)?.output?.statusCode;
+      const err = lastDisconnect?.error as any;
+      const code = err?.output?.statusCode;
       const loggedOut = code === DisconnectReason.loggedOut;
-      console.log("[wa] Connection closed, code:", code, "loggedOut:", loggedOut);
+      console.log("[wa] Connection closed, code:", code, "loggedOut:", loggedOut, "detail:", err?.message || err);
       if (myGen !== generation) return;
       state.status = "disconnected";
       await setStatus("disconnected");
@@ -107,6 +129,7 @@ export async function resetSession() {
   state.sock = null;
   state.status = "disconnected";
   state.lastQr = null;
+  state.pairingCode = null;
   await fs.rm(AUTH_DIR, { recursive: true, force: true }).catch(() => {});
   await clearSupabaseSession();
   console.log("[wa] session reset — fresh QR ban raha hai...");

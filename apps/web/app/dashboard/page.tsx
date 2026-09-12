@@ -51,6 +51,23 @@ export default function Dashboard() {
     }, 6000);
   }
 
+  const [pairCode, setPairCode] = useState<string | null>(null);
+  const [pairErr, setPairErr] = useState("");
+  const [pairLoading, setPairLoading] = useState(false);
+  async function getPairCode() {
+    setPairLoading(true);
+    setPairErr("");
+    try {
+      const r = await fetch("/api/agent-pairing", { method: "POST" });
+      const j = (await r.json()) as { code?: string; error?: string };
+      if (r.ok && j.code) setPairCode(j.code);
+      else setPairErr(j.error || "Code nahi bana — pehle Render me AGENT_NUMBER env set karo");
+    } catch {
+      setPairErr("Agent se baat nahi ho payi");
+    }
+    setPairLoading(false);
+  }
+
   return (
     <main style={{ maxWidth: 640, margin: "4vh auto", padding: 24 }}>
       <h1>WhatsApp Connect</h1>
@@ -77,6 +94,21 @@ export default function Dashboard() {
         style={{ padding: "10px 16px", borderRadius: 8, cursor: "pointer" }}>
         {resetting ? "Naya QR ban raha hai..." : "Naya QR lo"}
       </button>
+
+      <hr style={{ margin: "28px 0", opacity: 0.2 }} />
+      <h2>QR se na ho to — Code se link karo</h2>
+      <p style={{ opacity: 0.7, fontSize: 13 }}>
+        Agent wale phone me: WhatsApp → ⋮ → Linked Devices → Link a Device → neeche
+        “Link with phone number instead” → waha ye 8-digit code 1-2 min me type karo.
+      </p>
+      <button onClick={getPairCode} disabled={pairLoading}
+        style={{ padding: "10px 16px", borderRadius: 8, cursor: "pointer" }}>
+        {pairLoading ? "Code ban raha hai..." : "Pairing code lo"}
+      </button>
+      {pairCode && (
+        <p style={{ fontSize: 32, letterSpacing: 6, fontWeight: "bold" }}>{pairCode}</p>
+      )}
+      {pairErr && <p style={{ color: "#ff8080" }}>{pairErr}</p>}
 
       <hr style={{ margin: "28px 0", opacity: 0.2 }} />
       <h2>Test message</h2>
