@@ -108,7 +108,7 @@ export default function Dashboard() {
       <hr style={{ margin: "28px 0", opacity: 0.2 }} />
       <h2>QR se na ho to — Code se link karo</h2>
       <p style={{ opacity: 0.7, fontSize: 13 }}>
-        Pehle agent wale SIM ka number dalo (bina + ke, jaise 91XXXXXXXXXX), fir code lo.
+        Pehle agent wale SIM ka number dalo (10 digit ya 91 ke saath — 91 khud lag jayega).
         Us phone me: WhatsApp → ⋮ → Linked Devices → Link a Device → neeche
         “Link with phone number instead” → ye 8-digit code 1-2 min me type karo.
       </p>

@@ -24,17 +24,27 @@ export const state = {
   lastClose: null as { code: unknown; detail: string; at: number } | null,
 };
 
-// Agent wala SIM number (sirf digits, bina + ke). Pairing code isi pe ayega.
+// Agent wala SIM number (env se, optional — dashboard se bhi aa sakta hai).
 export function getAgentNumber(): string {
   return (process.env.AGENT_NUMBER || "").replace(/[^0-9]/g, "");
+}
+
+// Dashboard me 10-digit number bhi chalega — 91 khud lag jayega.
+// Galat format pe code dusre number ke liye ban jata hai aur phone "couldn't link" bolta hai.
+function normalizePairNumber(raw?: string): string {
+  let d = (raw || getAgentNumber()).replace(/[^0-9]/g, "");
+  d = d.replace(/^0+/, ""); // 077... -> 77...
+  if (d.length === 10) d = "91" + d; // India default country code
+  if (d.length < 10) throw new Error("Poora number dalo — 10 digit ya 91 ke saath (jaise 91XXXXXXXXXX)");
+  return d;
 }
 
 // QR scan fail ho to ye code phone me type karo:
 // WhatsApp → Linked Devices → Link a Device → "Link with phone number instead"
 export async function requestPairingCode(number?: string): Promise<string> {
   if (state.status === "connected") throw new Error("Pehle se connected hai");
-  const num = (number || getAgentNumber()).replace(/[^0-9]/g, "");
-  if (num.length < 10) throw new Error("Agent SIM ka poora number dalo (bina + ke, jaise 91XXXXXXXXXX)");
+  const num = normalizePairNumber(number);
+  console.log(`[wa] pairing code manga gaya number=${num} ke liye`);
   // Socket open hone ka wait (max ~20 sec) — band socket pe code nahi banta
   const deadline = Date.now() + 20000;
   while (Date.now() < deadline) {
