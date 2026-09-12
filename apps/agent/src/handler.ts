@@ -3,7 +3,7 @@ import { extractText, senderNumber } from "./handler.utils.js";
 import { isOwner } from "./whitelist.js";
 import { getAiReply } from "./ai.js";
 import { logMessage, recentHistory } from "./db.js";
-import { tryHandleReminderCommand, tryAnswerContestQuery, tryAnswerLastContestQuery } from "./reminders.js";
+import { tryHandleReminderCommand, tryAnswerContestQuery } from "./reminders.js";
 import { tryAnswerTimeQuery, tryAnswerWikiQuery } from "./tools.js";
 
 export async function handleIncomingMessage(sock: WASocket, m: WAMessage) {
@@ -27,19 +27,11 @@ export async function handleIncomingMessage(sock: WASocket, m: WAMessage) {
     return;
   }
 
-  // 2b. Contest info? ("next leetcode contest kab hai") — real date
+  // 2b. Contest Q&A — next/last/usse-pehle/contest <number> (real API)
   const contestResp = await tryAnswerContestQuery(text);
   if (contestResp) {
     await sock.sendMessage(m.key.remoteJid!, { text: contestResp });
     await logMessage(from, text, contestResp, true);
-    return;
-  }
-
-  // 2b2. Last contest problems? ("last contest me kya problems the")
-  const lastResp = await tryAnswerLastContestQuery(text);
-  if (lastResp) {
-    await sock.sendMessage(m.key.remoteJid!, { text: lastResp });
-    await logMessage(from, text, lastResp, true);
     return;
   }
 

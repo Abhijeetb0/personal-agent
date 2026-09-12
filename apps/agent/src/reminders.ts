@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { nextLeetCodeContest, lastLeetCodeContest, formatIST } from "./leetcode.js";
+import { nextLeetCodeContest, allLeetCodeContests, pastContests, upcomingContests, contestQuestions, formatIST } from "./leetcode.js";
 
 function sb() {
   const url = process.env.SUPABASE_URL!;
@@ -21,19 +21,68 @@ async function saveReminder(title: string, remindAt: Date, source = "custom") {
   return data;
 }
 
+// Unified contest Q&A — next / last / usse-pehle / contest <number> sab cover.
+// Reminder command wale yaha nahi aate (REMINDER_WORDS check).
+function withQuestions(name: string, startAt: Date, qs: { title: string }[]): string {
+  const lines = qs.map((q, i) => `${i + 1}. ${q.title}`).join("\n");
+  return `${name} (${formatIST(startAt)} IST)\nProblems:\n${lines}`;
+}
+
 // "last contest me kya problems the?" — real list
 export async function tryAnswerLastContestQuery(text: string): Promise<string | null> {
-  if (!/contest/i.test(text)) return null;
-  if (!/(last|pichla|pichhla|previous|ho\s*gaya|latest|kya\s*(problems?|questions?|the|tha))/i.test(text)) return null;
-  if (REMINDER_WORDS.test(text)) return null;
+  return tryAnswerContestQuery(text);
+}
+
+// "next leetcode contest kab hai?" — real API date batao (AI andaza na lagaye)
+export async function tryAnswerContestQuery(text: string): Promise<string | null> {
+  if (!/contest|leetcode/i.test(text)) return null;
+  if (REMINDER_WORDS.test(text)) return null; // ye reminder command hai, info nahi
+  const low = text.toLowerCase();
   try {
-    const last = await lastLeetCodeContest();
-    if (!last || last.questions.length === 0) return "Last contest ke problems abhi nahi mile. Thodi der me fir pucho.";
-    const lines = last.questions.map((q, i) => `${i + 1}. ${q.title}`).join("\n");
-    return `Last contest: ${last.name} (${formatIST(last.startAt)} IST)\nProblems:\n${lines}`;
+    const all = await allLeetCodeContests();
+
+    // specific number: "contest 518", "weekly 519", "biweekly 190"
+    const numM = low.match(/(weekly|biweekly)?\s*(contest)?\s*(\d{3})/);
+    if (numM) {
+      const n = numM[3];
+      const type = numM[1]; // weekly|biweekly|undefined
+      const found = all.find(
+        (c) => c.slug.endsWith(`-${n}`) && (!type || c.slug.startsWith(type))
+      );
+      if (!found) return `Contest ${n} nahi mila. Number check karo (jaise "weekly contest 518").`;
+      const qs = await contestQuestions(found.slug);
+      if (qs.length === 0) return `${found.name} (${formatIST(found.startAt)} IST) abhi hua nahi hai — problems contest ke baad dikhenge.`;
+      return withQuestions(found.name, found.startAt, qs);
+    }
+
+    // "usse pehle wala / second last / pichle se pehle"
+    if (/(usse|us se|is se)\s*(pehle|pahle)|(second|2nd)\s*last|pichle\s*se\s*pehle|previous\s*to\s*previous/i.test(text)) {
+      const past = pastContests(all);
+      const c = past[1];
+      if (!c) return "Usse pehle ka contest nahi mila.";
+      const qs = await contestQuestions(c.slug);
+      if (qs.length === 0) return `${c.name} ke problems nahi mile.`;
+      return "Usse pehle wala — " + withQuestions(c.name, c.startAt, qs);
+    }
+
+    // last / pichla (problems maange to list ke saath)
+    if (/(last|pichla|pichhla|previous|latest)/i.test(text)) {
+      const past = pastContests(all);
+      const c = past[0];
+      if (!c) return "Last contest nahi mila.";
+      const qs = await contestQuestions(c.slug);
+      if (qs.length === 0) return `${c.name} (${formatIST(c.startAt)} IST) — problems abhi nahi mile.`;
+      return withQuestions(c.name, c.startAt, qs);
+    }
+
+    // default: next upcoming
+    const up = upcomingContests(all);
+    const c = up[0];
+    if (!c) return "LeetCode contest list abhi nahi mil payi. Thodi der me fir pucho.";
+    return `Next LeetCode contest: ${c.name}\n${formatIST(c.startAt)} (IST) ko hai.\nChaho to bolo "is se 30 min pehle remind kar" — yaad dila dunga!`;
   } catch (e) {
-    console.error("[leetcode] last fail:", (e as Error).message);
-    return "Last contest ke problems abhi nahi mil paye. Thodi der me fir pucho.";
+    console.error("[leetcode] contest q fail:", (e as Error).message);
+    return "Contest info abhi nahi mil payi. Thodi der me fir pucho.";
   }
 }
 function minutesBefore(text: string): number {
@@ -51,16 +100,6 @@ function relativeMinutes(text: string): number | null {
 }
 
 const REMINDER_WORDS = /(remind|reminder|yaad\s*dila|alarm|notify|contest\s*se)/i;
-
-// "next leetcode contest kab hai?" — real API date batao (AI andaza na lagaye)
-export async function tryAnswerContestQuery(text: string): Promise<string | null> {
-  if (!/contest/i.test(text)) return null;
-  if (!/(kab|when|next|agla|aglaa|date|time|bata|konsa|kaun)/i.test(text)) return null;
-  if (REMINDER_WORDS.test(text)) return null; // ye reminder command hai, info nahi
-  const contest = await nextLeetCodeContest();
-  if (!contest) return "LeetCode contest list abhi nahi mil payi. Thodi der me fir pucho.";
-  return `Next LeetCode contest: ${contest.name}\n${formatIST(contest.startAt)} (IST) ko hai.\nChaho to bolo "is se 30 min pehle remind kar" — yaad dila dunga!`;
-}
 
 export async function tryHandleReminderCommand(text: string): Promise<string | null> {
   if (!REMINDER_WORDS.test(text)) return null;
