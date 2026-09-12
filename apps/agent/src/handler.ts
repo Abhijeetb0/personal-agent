@@ -4,7 +4,8 @@ import { isOwner } from "./whitelist.js";
 import { getAiReply } from "./ai.js";
 import { logMessage, recentHistory } from "./db.js";
 import { tryHandleReminderCommand, tryAnswerContestQuery } from "./reminders.js";
-import { tryAnswerTimeQuery, tryAnswerWikiQuery } from "./tools.js";
+import { tryAnswerTimeQuery, tryAnswerWikiQuery, tryAnswerNewsQuery } from "./tools.js";
+import { ddgSearch, looksFactual } from "./web.js";
 
 export async function handleIncomingMessage(sock: WASocket, m: WAMessage) {
   const text = extractText(m);
@@ -43,11 +44,19 @@ export async function handleIncomingMessage(sock: WASocket, m: WAMessage) {
     return;
   }
 
-  // 2d. "X kya hai?" — Wikipedia se real jawab
+  // 2d. "X kya hai?" (short definitional) — Wikipedia se real jawab
   const wikiResp = await tryAnswerWikiQuery(text);
   if (wikiResp) {
     await sock.sendMessage(m.key.remoteJid!, { text: wikiResp });
     await logMessage(from, text, wikiResp, true);
+    return;
+  }
+
+  // 2e. News/trending — deterministic headlines (AI ke bina bhi chalega)
+  const newsResp = await tryAnswerNewsQuery(text);
+  if (newsResp) {
+    await sock.sendMessage(m.key.remoteJid!, { text: newsResp });
+    await logMessage(from, text, newsResp, true);
     return;
   }
 
@@ -60,9 +69,18 @@ export async function handleIncomingMessage(sock: WASocket, m: WAMessage) {
     await sock.sendMessage(m.key.remoteJid!, { text: reply });
     await logMessage(from, text, reply, true);
   } catch (e) {
-    console.error("[gemini] fail:", (e as Error).message);
-    await sock.sendMessage(m.key.remoteJid!, {
-      text: "Abhi thoda issue hai, 1 min me fir bolo. (AI key/limit check karo)",
-    });
+    console.error("[ai] fail:", (e as Error).message);
+    // AI down? factual sawal ho to search snippets hi bhej do — khaali haath nahi
+    let fallback = "Abhi thoda issue hai, 1 min me fir bolo. (AI key/limit check karo)";
+    try {
+      if (looksFactual(text)) {
+        const hits = await ddgSearch(text, 3);
+        if (hits.length > 0) {
+          fallback = "AI busy hai, par ye mila:\n" + hits.map((h, i) => `${i + 1}. ${h.title} — ${h.snippet.slice(0, 130)}`).join("\n");
+        }
+      }
+    } catch {}
+    await sock.sendMessage(m.key.remoteJid!, { text: fallback });
+    await logMessage(from, text, fallback, true);
   }
 }

@@ -10,7 +10,7 @@ Rules:
 export async function getGroqReply(userText: string, history: string[] = []): Promise<string> {
   const key = process.env.GROQ_API_KEY || "";
   if (!key) throw new Error("GROQ_API_KEY missing");
-  const model = process.env.GROQ_MODEL || "qwen/qwen3.6-27b";
+  const model = process.env.GROQ_MODEL || "groq/compound-mini";
   const messages = [
     { role: "system", content: SYSTEM },
     ...history.slice(-6).map((h, i) => ({

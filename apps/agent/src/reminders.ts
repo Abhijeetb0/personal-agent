@@ -55,8 +55,8 @@ export async function tryAnswerContestQuery(text: string): Promise<string | null
       return withQuestions(found.name, found.startAt, qs);
     }
 
-    // "usse pehle wala / second last / pichle se pehle"
-    if (/(usse|us se|is se)\s*(pehle|pahle)|(second|2nd)\s*last|pichle\s*se\s*pehle|previous\s*to\s*previous/i.test(text)) {
+    // "usse pehle wala / second last / pichle se pehle" (typo-tolerant: phele/bale)
+    if (/(usse|us se|is se|second|2nd|pichle\s*se)\W{0,10}(pehle|pahle|phele|previous|last)|pichle\s*se\s*pehle|previous\s*to\s*previous/i.test(text)) {
       const past = pastContests(all);
       const c = past[1];
       if (!c) return "Usse pehle ka contest nahi mila.";
@@ -65,8 +65,8 @@ export async function tryAnswerContestQuery(text: string): Promise<string | null
       return "Usse pehle wala — " + withQuestions(c.name, c.startAt, qs);
     }
 
-    // last / pichla (problems maange to list ke saath)
-    if (/(last|pichla|pichhla|previous|latest)/i.test(text)) {
+    // last / pichla / pehle (typo-tolerant) — "us se pahle bale contest" bhi pakdega
+    if (/(last|pichla|pichhla|previous|latest|pehle|pahle|phele|before)/i.test(text)) {
       const past = pastContests(all);
       const c = past[0];
       if (!c) return "Last contest nahi mila.";

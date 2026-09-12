@@ -82,7 +82,7 @@ export async function fetchPageText(url: string, maxChars = 3000): Promise<strin
 // Fact jaisa sawal? to web context lagao. Greeting/chitchat pe nahi.
 export function looksFactual(text: string): boolean {
   if (text.length < 30 && !/[?]$/.test(text.trim()) && !/(kya|kaun|kon|kab|kahan|kaise|kyu|kyon|kitna|kaunsa|kisne|batao)/i.test(text)) return false;
-  return /[?]|(kya|kaun|kon|kab|kahan|kaise|kyu|kyon|kitna|kitne|kaunsa|kaunsi|kisne|kis|latest|news|score|price|rate|result|winner|batao|search|google|dekho|pata\s*karo|kaun\s*jeeta|weather|mausam)\b/i.test(text);
+  return /[?]|(kya|kaun|kon|kab|kahan|kaise|kyu|kyon|kitna|kitne|kaunsa|kaunsi|kisne|kis|latest|news|score|price|rate|result|winner|batao|search|google|dekho|pata\s*karo|kaun\s*jeeta|weather|mausam|capital|growth|share\s*price)\b/i.test(text);
 }
 
 export function searchContextBlock(hits: SearchHit[]): string {
