@@ -1,6 +1,12 @@
 -- MULTI-USER migration (Supabase SQL Editor → New query → Run)
--- Purani single-user tables rehne do (baad me dashboard se delete kar dena).
+-- Purani single-user tables _legacy naam se side me rahengi (data safe).
 -- Pehle: Authentication → Sign In/Up → "Confirm email" OFF karo (warna login atakega).
+
+-- 0. Purani tables side me (naam takrayenge nahi, data bhi safe)
+alter table if exists "Message" rename to "Message_legacy";
+alter table if exists "Reminder" rename to "Reminder_legacy";
+alter table if exists "WhatsappSession" rename to "WhatsappSession_legacy";
+alter table if exists "Setting" rename to "Setting_legacy";
 
 -- 1. Per-user settings (owner = wo number jis se user agent se baat karega)
 create table if not exists "UserSetting" (
