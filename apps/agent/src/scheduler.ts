@@ -1,34 +1,35 @@
 import cron from "node-cron";
-import { createClient } from "@supabase/supabase-js";
-import { sendWhatsAppMessage } from "./baileys.js";
-import { getOwner } from "./whitelist.js";
+import { sbAdmin } from "./sb.js";
+import { sendWhatsAppMessage, allSessions } from "./baileys.js";
 
-// Har minute: due reminders bhejo. Render Free sleep me miss ho sakta hai
-// (README me UptimeRobot jugaad diya hai).
+// Har minute: har connected user ke due reminders bhejo.
+// Render Free sleep me miss ho sakta hai (cron-job.org ping lagao).
 export function startScheduler() {
-  if (!process.env.SUPABASE_URL) {
-    console.log("[cron] SUPABASE_URL nahi hai — scheduler off (sirf chat chalega)");
+  if (!sbAdmin) {
+    console.log("[cron] DB nahi hai — scheduler off (sirf chat chalega)");
     return;
   }
   cron.schedule("* * * * *", async () => {
     try {
-      const url = process.env.SUPABASE_URL!;
-      const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_PUBLISHABLE_KEY!;
-      const sb = createClient(url, key);
-      const { data } = await sb
+      const { data } = await sbAdmin!
         .from("Reminder")
-        .select("id,title,remindAt")
+        .select("id,user_id,title,remind_at")
         .eq("sent", false)
-        .lte("remindAt", new Date().toISOString())
-        .limit(10);
+        .lte("remind_at", new Date().toISOString())
+        .limit(25);
       const due = (data as any[]) || [];
       if (due.length === 0) return;
-      const ownerJid = `${getOwner()}@s.whatsapp.net`;
+      const live = new Map(allSessions().filter((s) => s.status === "connected").map((s) => [s.userId, s]));
       for (const r of due) {
+        const s = live.get(r.user_id);
+        if (!s || !s.ownerNumber) {
+          console.log(`[cron] skip ${r.id}: user session connected nahi`);
+          continue;
+        }
         try {
-          await sendWhatsAppMessage(ownerJid, `⏰ Reminder: ${r.title}`);
-          await sb.from("Reminder").update({ sent: true }).eq("id", r.id);
-          console.log(`[cron] reminder bheja: ${r.title}`);
+          await sendWhatsAppMessage(r.user_id, `${s.ownerNumber}@s.whatsapp.net`, `⏰ Reminder: ${r.title}`);
+          await sbAdmin!.from("Reminder").update({ sent: true }).eq("id", r.id);
+          console.log(`[cron] reminder bheja (${r.user_id.slice(0, 8)}): ${r.title}`);
         } catch (e) {
           console.error("[cron] send fail:", (e as Error).message);
         }

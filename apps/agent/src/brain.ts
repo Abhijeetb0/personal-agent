@@ -2,7 +2,7 @@ import { groqChat, type ChatMsg } from "./groq.js";
 import {
   allLeetCodeContests, pastContests, upcomingContests, contestQuestions, formatIST,
 } from "./leetcode.js";
-import { saveReminder } from "./reminders.js";
+import { saveReminder, listPendingReminders } from "./reminders.js";
 import { wikiSummary, tryAnswerNewsQuery } from "./tools.js";
 import { saveMemory, forgetMemory, recallMemories } from "./memory.js";
 import { ddgSearch, searchContextBlock } from "./web.js";
@@ -29,6 +29,7 @@ Tumhare paas ye TOOLS hain. Har jawab SIRF JSON me do, aur kuch nahi:
 6. news — args: {} — aaj ki top headlines
 7. remember — args: {"fact":"..."} — user ki pakki baat long-term yaad rakho (naam, pasand, team, goals; "yaad rakhna" bole to LAZMI)
 8. forget — args: {"keyword":"..."} — "bhool jao" bole to matching yaad mitao
+9. list_reminders — args: {} — pending reminders ki list ("mere reminders dikhao" pe LAZMI, andaza mat lagao)
 
 Rules:
 - Tool result milne ke baad use padh ke user ko Hinglish me jawab do (JSON nahi, seedha text reply action me).
@@ -62,7 +63,7 @@ function fmtContestList(name: string, startAt: Date, qs: { title: string }[]): s
   return `${name} (${formatIST(startAt)} IST)\nProblems:\n${lines}`;
 }
 
-async function runTool(name: string, args: Record<string, any>): Promise<string> {
+async function runTool(userId: string, name: string, args: Record<string, any>): Promise<string> {
   switch (name) {
     case "time_now": {
       const now = new Date();
@@ -102,7 +103,7 @@ async function runTool(name: string, args: Record<string, any>): Promise<string>
       if (isNaN(at.getTime())) return "ERROR: remindAt samajh nahi aaya, ISO datetime do.";
       if (at.getTime() < Date.now()) return "ERROR: ye time nikal gaya hai, future ka time do.";
       const title = String(args.title || "Reminder").slice(0, 140);
-      await saveReminder(title, at, "brain");
+      await saveReminder(userId, title, at, "brain");
       const when = at.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", weekday: "short", hour: "numeric", minute: "2-digit" });
       return `Reminder set: "${title}" — ${when} IST pe yaad dilaunga.`;
     }
@@ -120,10 +121,18 @@ async function runTool(name: string, args: Record<string, any>): Promise<string>
       return n || "ERROR: headlines nahi mili.";
     }
     case "remember": {
-      return await saveMemory(String(args.fact || ""));
+      return await saveMemory(userId, String(args.fact || ""));
     }
     case "forget": {
-      return await forgetMemory(String(args.keyword || ""));
+      return await forgetMemory(userId, String(args.keyword || ""));
+    }
+    case "list_reminders": {
+      const rows = await listPendingReminders(userId);
+      if (!rows.length) return "Koi pending reminder nahi hai.";
+      return "Pending reminders:\n" + rows.map((r, i) => {
+        const at = new Date(r.remindAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", weekday: "short", hour: "numeric", minute: "2-digit" });
+        return `${i + 1}. ${r.title} — ${at} IST`;
+      }).join("\n");
     }
     default:
       return `ERROR: unknown tool "${name}".`;
@@ -138,10 +147,10 @@ function toRoleMsgs(history: string[]): ChatMsg[] {
   });
 }
 
-export async function brainReply(userText: string, history: string[] = []): Promise<string> {
+export async function brainReply(userText: string, history: string[] = [], userId = "owner"): Promise<string> {
   const nowIST = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
   // Long-term memory: jude facts (chhote, token-light)
-  const mems = await recallMemories(userText);
+  const mems = await recallMemories(userId, userText);
   const memBlock = mems.length ? `\n\nUSER KI PAKKI BAATEIN (long-term memory, inhe yaad rakho):\n${mems.map((m, i) => `${i + 1}. ${m}`).join("\n")}` : "";
   const system = BRAIN_SYSTEM.replace("{NOW_IST}", nowIST) + memBlock;
   const msgs: ChatMsg[] = [
@@ -153,7 +162,8 @@ export async function brainReply(userText: string, history: string[] = []): Prom
   const needs = (t: string): string[] => {
     const n: string[] = [];
     if (/contest|leetcode/i.test(t)) n.push("contest");
-    if (/remind|yaad\s*dila|alarm|notify/i.test(t)) n.push("remind");
+    if (/(dikhao|dikha|show|list).*remind|remind.*(dikhao|dikha|show|list|batao)/i.test(t)) n.push("list_reminders");
+    else if (/remind|yaad\s*dila|alarm|notify/i.test(t)) n.push("remind");
     return n;
   };
   const required = needs(userText);
@@ -188,7 +198,7 @@ export async function brainReply(userText: string, history: string[] = []): Prom
     }
     used.push(act.name);
     console.log(`[brain] tool: ${act.name} ${JSON.stringify(act.args).slice(0, 120)}`);
-    const result = await runTool(act.name, act.args);
+    const result = await runTool(userId, act.name, act.args);
     msgs.push({ role: "assistant", content: JSON.stringify({ action: "tool", name: act.name, args: act.args }) });
     msgs.push({ role: "user", content: `TOOL RESULT (${act.name}):\n${result}\n\nAb user ko final jawab do (JSON reply action me).` });
   }

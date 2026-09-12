@@ -1,51 +1,73 @@
 import express from "express";
 import cors from "cors";
 import QRCode from "qrcode";
-import { createClient } from "@supabase/supabase-js";
-import { state, sendWhatsAppMessage, resetSession, requestPairingCode, getAgentNumber } from "./baileys.js";
+import { authUserId } from "./sb.js";
+import {
+  getSession, ensureSession, sendWhatsAppMessage, resetSession, requestPairingCode,
+} from "./baileys.js";
+import { setOwnerNumber, getOwnerNumber } from "./store.js";
 import { nextLeetCodeContest, formatIST } from "./leetcode.js";
+
+declare global {
+  namespace Express {
+    interface Request {
+      userId?: string;
+    }
+  }
+}
 
 export function buildRoutes() {
   const app = express();
   app.use(cors());
   app.use(express.json());
 
-  // simple shared-secret guard (web dashboard se calls ke liye)
-  const SECRET = process.env.AGENT_API_SECRET || "";
-  const guard = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    if (!SECRET) return next(); // local dev me open
-    if (req.headers["x-agent-secret"] === SECRET) return next();
-    // health/qr ko bina secret padhne do taaki dashboard status dikha sake? nahi — qr sensitive hai
-    if (req.path === "/health") return next();
-    return res.status(401).json({ error: "unauthorized" });
+  app.get("/health", (_req, res) => res.json({ ok: true }));
+
+  // Auth: Supabase JWT (website login) -> user_id. Sab WA APIs per-user.
+  const auth = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    // local dev bypass (sirf jab ALLOW_NO_AUTH=1 ho)
+    if (process.env.ALLOW_NO_AUTH === "1" && !req.headers.authorization) {
+      req.userId = (req.query.user as string) || "owner";
+      return next();
+    }
+    const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+    const uid = await authUserId(token);
+    if (!uid) return res.status(401).json({ error: "login required" });
+    req.userId = uid;
+    // session lazy-start (pehli baar aane pe)
+    ensureSession(uid);
+    next();
   };
-  app.use(guard);
 
-  app.get("/health", (_req, res) => res.json({ ok: true, status: state.status }));
+  const needUser = (req: express.Request) => req.userId!;
 
-  app.get("/status", (_req, res) =>
+  app.get("/status", auth, (req, res) => {
+    const s = getSession(needUser(req));
     res.json({
-      status: state.status,
-      connected: state.status === "connected",
-      wsOpen: (state.sock as any)?.ws?.readyState === 1,
-      lastClose: state.lastClose,
-    })
-  );
+      status: s.status,
+      connected: s.status === "connected",
+      wsOpen: (s.sock as any)?.ws?.readyState === 1,
+      lastClose: s.lastClose,
+      ownerNumber: s.ownerNumber || null,
+    });
+  });
 
   // QR string + dataURL (dashboard <img> me dikhane ke liye)
-  app.get("/qr", async (_req, res) => {
-    if (!state.lastQr) return res.json({ status: state.status, qr: null, dataUrl: null });
-    const dataUrl = await QRCode.toDataURL(state.lastQr);
-    res.json({ status: state.status, qr: state.lastQr, dataUrl });
+  app.get("/qr", auth, async (req, res) => {
+    const s = getSession(needUser(req));
+    if (!s.lastQr) return res.json({ status: s.status, qr: null, dataUrl: null });
+    const dataUrl = await QRCode.toDataURL(s.lastQr);
+    res.json({ status: s.status, qr: s.lastQr, dataUrl });
   });
 
   // manual test: owner ko message bhejo (dashboard se test button)
-  app.post("/send", async (req, res) => {
+  app.post("/send", auth, async (req, res) => {
     try {
+      const uid = needUser(req);
       const { to, text } = req.body as { to: string; text: string };
       if (!to || !text) return res.status(400).json({ error: "to + text chahiye" });
       const jid = to.includes("@") ? to : `${to}@s.whatsapp.net`;
-      await sendWhatsAppMessage(jid, text);
+      await sendWhatsAppMessage(uid, jid, text);
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
@@ -53,68 +75,55 @@ export function buildRoutes() {
   });
 
   // Dashboard: "Naya QR" — aadha-fasa session saaf karke fresh pairing shuru karo
-  app.post("/reset", async (_req, res) => {
+  app.post("/reset", auth, async (req, res) => {
     try {
-      await resetSession();
+      await resetSession(needUser(req));
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }
   });
 
-  // Pairing code: QR ki jagah phone me 8-digit code type karo.
-  // Body me { number } bhejo (dashboard se), warna AGENT_NUMBER env use hoga.
-  app.post("/pairing-code", async (req, res) => {
+  // Pairing code: QR ki jagah phone me 8-digit code type karo. Body: { number }
+  app.post("/pairing-code", auth, async (req, res) => {
     try {
-      const bodyNum = String((req.body as any)?.number || "").replace(/[^0-9]/g, "");
-      const num = bodyNum || getAgentNumber();
-      const code = await requestPairingCode(num);
-      res.json({ ok: true, code, number: num });
+      const num = String((req.body as any)?.number || "");
+      const out = await requestPairingCode(needUser(req), num);
+      res.json({ ok: true, ...out });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }
   });
 
-  app.get("/pairing-code", (_req, res) => {
+  app.get("/pairing-code", auth, (req, res) => {
+    const s = getSession(needUser(req));
     res.json({
-      code: state.pairingCode,
-      ageSec: state.pairingCodeAt ? Math.round((Date.now() - state.pairingCodeAt) / 1000) : null,
-      agentNumberSet: getAgentNumber().length >= 10,
-      status: state.status,
+      code: s.pairingCode,
+      ageSec: s.pairingCodeAt ? Math.round((Date.now() - s.pairingCodeAt) / 1000) : null,
+      status: s.status,
     });
   });
 
-  const sb = () => {
-    const url = process.env.SUPABASE_URL!;
-    const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_PUBLISHABLE_KEY!;
-    return createClient(url, key);
-  };
-
-  // Dashboard: reminders list
-  app.get("/reminders", async (_req, res) => {
-    try {
-      const { data } = await sb()
-        .from("Reminder")
-        .select("id,title,remindAt,sent,source")
-        .order("remindAt", { ascending: true })
-        .limit(50);
-      res.json({ reminders: data ?? [] });
-    } catch (e) {
-      res.status(500).json({ error: (e as Error).message });
-    }
+  // Owner number: jis number se user agent se baat karega (whitelist)
+  app.get("/owner", auth, async (req, res) => {
+    const uid = needUser(req);
+    const s = getSession(uid);
+    res.json({ ownerNumber: s.ownerNumber || (await getOwnerNumber(uid)) || null });
   });
 
-  app.delete("/reminders/:id", async (req, res) => {
+  app.post("/owner", auth, async (req, res) => {
     try {
-      await sb().from("Reminder").delete().eq("id", req.params.id);
-      res.json({ ok: true });
+      const uid = needUser(req);
+      const clean = await setOwnerNumber(uid, String((req.body as any)?.ownerNumber || ""));
+      getSession(uid).ownerNumber = clean;
+      res.json({ ok: true, ownerNumber: clean });
     } catch (e) {
-      res.status(500).json({ error: (e as Error).message });
+      res.status(400).json({ error: (e as Error).message });
     }
   });
 
   // Dashboard: next leetcode contest dekho
-  app.get("/leetcode/next", async (_req, res) => {
+  app.get("/leetcode/next", auth, async (_req, res) => {
     const c = await nextLeetCodeContest();
     if (!c) return res.json({ contest: null });
     res.json({ contest: { name: c.name, startAt: c.startAt, startIST: formatIST(c.startAt), url: c.url } });

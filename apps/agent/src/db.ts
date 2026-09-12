@@ -1,28 +1,23 @@
-import { createClient } from "@supabase/supabase-js";
+import { sbAdmin } from "./sb.js";
 
-export async function logMessage(from: string, body: string, reply: string | null, isOwner: boolean) {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_PUBLISHABLE_KEY;
-  if (!url || !key) return; // DB bina bhi agent chalega
+export async function logMessage(userId: string, from: string, body: string, reply: string | null, owner: boolean) {
+  if (!sbAdmin) return; // DB bina bhi agent chalega
   try {
-    const sb = createClient(url, key);
-    await sb.from("Message").insert({ fromNumber: from, body, reply, isOwner });
+    await sbAdmin.from("Message").insert({ user_id: userId, from_number: from, body, reply, is_owner: owner });
   } catch (e) {
     console.error("[db] log failed:", (e as Error).message);
   }
 }
 
-export async function recentHistory(from: string, limit = 6): Promise<string[]> {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_PUBLISHABLE_KEY;
-  if (!url || !key) return [];
+export async function recentHistory(userId: string, from: string, limit = 8): Promise<string[]> {
+  if (!sbAdmin) return [];
   try {
-    const sb = createClient(url, key);
-    const { data } = await sb
+    const { data } = await sbAdmin
       .from("Message")
       .select("body,reply")
-      .eq("fromNumber", from)
-      .order("createdAt", { ascending: false })
+      .eq("user_id", userId)
+      .eq("from_number", from)
+      .order("created_at", { ascending: false })
       .limit(limit);
     return ((data as any[] | null) || []).reverse().flatMap((r) => [`User: ${r.body}`, `Assistant: ${r.reply ?? ""}`]);
   } catch {

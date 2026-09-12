@@ -1,5 +1,5 @@
-// Supabase Postgres (free tier). Render ki disk ephemeral hai,
-// isliye session + reminders sab yahi rahega.
+// Multi-user schema (Supabase Auth users). Agent code supabase-js use karta hai;
+// ye file documentation + future migrations ke liye hai.
 
 generator client {
   provider = "prisma-client-js"
@@ -10,46 +10,56 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id           String   @id @default(cuid())
-  createdAt    DateTime @default(now())
-  // single-user MVP: ek hi row, password hash
-  passwordHash String?
+model UserSetting {
+  userId      String   @id @map("user_id") @db.Uuid
+  ownerNumber String   @default("") @map("owner_number")
+  updatedAt   DateTime @default(now()) @map("updated_at")
+
+  @@map("UserSetting")
 }
 
-model WhatsappSession {
-  id        String   @id @default("default")
-  userId    String?  @default("owner")
-  authBlob  Json?    // Baileys creds + keys (file auth ka backup)
-  status    String   @default("disconnected") // qr | connected | disconnected
-  qr        String?  // last QR string (web pe dikhane ke liye)
-  updatedAt DateTime @updatedAt
-}
+model WaSession {
+  userId    String   @id @map("user_id") @db.Uuid
+  authBlob  Json?    @map("auth_blob")
+  status    String   @default("disconnected")
+  qr        String?
+  updatedAt DateTime @default(now()) @map("updated_at")
 
-model Setting {
-  userId      String @id @default("owner")
-  ownerNumber String @default("917761815151")
-  updatedAt   DateTime @updatedAt
+  @@map("WaSession")
 }
 
 model Message {
   id         String   @id @default(cuid())
-  fromNumber String
+  userId     String   @map("user_id") @db.Uuid
+  fromNumber String   @map("from_number")
   body       String
   reply      String?
-  isOwner    Boolean  @default(false)
-  createdAt  DateTime @default(now())
+  isOwner    Boolean  @default(false) @map("is_owner")
+  createdAt  DateTime @default(now()) @map("created_at")
 
-  @@index([fromNumber, createdAt])
+  @@index([userId, createdAt])
+  @@map("Message")
 }
 
 model Reminder {
   id        String   @id @default(cuid())
+  userId    String   @map("user_id") @db.Uuid
   title     String
-  remindAt  DateTime
+  remindAt  DateTime @map("remind_at")
   sent      Boolean  @default(false)
-  source    String   @default("custom") // custom | leetcode
-  createdAt DateTime @default(now())
+  source    String   @default("custom")
+  createdAt DateTime @default(now()) @map("created_at")
 
-  @@index([sent, remindAt])
+  @@index([userId, sent, remindAt])
+  @@map("Reminder")
+}
+
+model Memory {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id") @db.Uuid
+  fact      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@map("Memory")
 }

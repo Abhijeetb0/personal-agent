@@ -15,9 +15,9 @@ export function getOwner(): string {
   return normalize(process.env.OWNER_NUMBER || "917761815151");
 }
 
-export async function isOwner(sock: WASocket | null, from: string, rawJid?: string): Promise<boolean> {
+export async function isOwner(sock: WASocket | null, from: string, rawJid?: string, owner?: string): Promise<boolean> {
   const f = normalize(from);
-  const o = getOwner();
+  const o = normalize(owner || "");
   if (!f || !o) return false;
   if (f === o) return true;
   // last 10 digit match (91 prefix / 0 prefix variations)

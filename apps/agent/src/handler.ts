@@ -5,17 +5,20 @@ import { getAiReply } from "./ai.js";
 import { logMessage, recentHistory } from "./db.js";
 import { tryFastLane } from "./fastlane.js";
 import { ddgSearch, looksFactual } from "./web.js";
+import { getSession } from "./baileys.js";
 
-export async function handleIncomingMessage(sock: WASocket, m: WAMessage) {
+export async function handleIncomingMessage(sock: WASocket, m: WAMessage, userId: string) {
   const text = extractText(m);
   const from = await senderNumber(sock, m);
   const rawJid = m.key.participant || m.key.remoteJid || "";
   if (!text || !from) return;
 
+  const owner = getSession(userId).ownerNumber;
+
   // 1. Whitelist: sirf owner ko reply
-  if (!(await isOwner(sock, from, rawJid))) {
+  if (!(await isOwner(sock, from, rawJid, owner))) {
     console.log(`[guard] non-owner ${from} (${rawJid}) ignored`);
-    await logMessage(from, text, null, false);
+    await logMessage(userId, from, text, null, false);
     return;
   }
 
@@ -25,7 +28,7 @@ export async function handleIncomingMessage(sock: WASocket, m: WAMessage) {
     const fast = await tryFastLane(text);
     if (fast) {
       await sock.sendMessage(m.key.remoteJid!, { text: fast });
-      await logMessage(from, text, fast, true);
+      await logMessage(userId, from, text, fast, true);
       return;
     }
   } catch (e) {
@@ -35,11 +38,11 @@ export async function handleIncomingMessage(sock: WASocket, m: WAMessage) {
   // 3. Brain: samjho -> tool chahiye to chalao -> jawab do
   try {
     console.log(`[msg] brain soch raha...`);
-    const history = await recentHistory(from);
-    const reply = await getAiReply(text, history);
+    const history = await recentHistory(userId, from);
+    const reply = await getAiReply(text, history, userId);
     console.log(`[msg] reply ready (${reply.length} chars), bhej rahe...`);
     await sock.sendMessage(m.key.remoteJid!, { text: reply });
-    await logMessage(from, text, reply, true);
+    await logMessage(userId, from, text, reply, true);
   } catch (e) {
     console.error("[ai] fail:", (e as Error).message);
     // AI down? factual sawal ho to search snippets hi bhej do — khaali haath nahi
@@ -53,6 +56,6 @@ export async function handleIncomingMessage(sock: WASocket, m: WAMessage) {
       }
     } catch {}
     await sock.sendMessage(m.key.remoteJid!, { text: fallback });
-    await logMessage(from, text, fallback, true);
+    await logMessage(userId, from, text, fallback, true);
   }
 }

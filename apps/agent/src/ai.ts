@@ -3,9 +3,9 @@ import { getGroqReply } from "./groq.js";
 import { getReply as getGeminiReply } from "./gemini.js";
 
 // Brain (samajh + tools) pehle. Sab fail ho to plain AI fallback.
-export async function getAiReply(userText: string, history: string[] = []): Promise<string> {
+export async function getAiReply(userText: string, history: string[] = [], userId = "owner"): Promise<string> {
   try {
-    return await brainReply(userText, history);
+    return await brainReply(userText, history, userId);
   } catch (e) {
     const msg = (e as Error).message || "";
     console.error("[ai] brain failed, plain fallback:", msg.slice(0, 120));
@@ -14,7 +14,7 @@ export async function getAiReply(userText: string, history: string[] = []): Prom
       console.log("[ai] 12s cooldown, retry...");
       await new Promise((r) => setTimeout(r, 12000));
       try {
-        return await brainReply(userText, history);
+        return await brainReply(userText, history, userId);
       } catch (e2) {
         console.error("[ai] retry failed:", (e2 as Error).message.slice(0, 120));
       }

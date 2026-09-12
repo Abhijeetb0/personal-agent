@@ -6,157 +6,199 @@ import makeWASocket, {
 import type { WASocket } from "@whiskeysockets/baileys";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { restoreAuthFromSupabase, saveAuthToSupabase, setStatus, clearSupabaseSession } from "./store.js";
+import {
+  restoreAuthFromSupabase, saveAuthToSupabase, setStatus,
+  clearSupabaseSession, listSessionUsers, getOwnerNumber,
+} from "./store.js";
 import { handleIncomingMessage } from "./handler.js";
 
-const AUTH_DIR = process.env.AUTH_DIR || path.join(process.cwd(), "auth_info");
+const AUTH_ROOT = process.env.AUTH_DIR || path.join(process.cwd(), "auth_info");
 
-// Purane socket ke events naye session se na takraye, isliye generation guard.
-let generation = 0;
+export type ConnStatus = "qr" | "connected" | "disconnected";
 
-export const state = {
-  sock: null as WASocket | null,
-  status: "disconnected" as "qr" | "connected" | "disconnected",
-  lastQr: null as string | null,
-  lastQrAt: 0,
-  pairingCode: null as string | null,
-  pairingCodeAt: 0,
-  lastClose: null as { code: unknown; detail: string; at: number } | null,
-};
-
-// Agent wala SIM number (env se, optional — dashboard se bhi aa sakta hai).
-export function getAgentNumber(): string {
-  return (process.env.AGENT_NUMBER || "").replace(/[^0-9]/g, "");
+export interface UserSession {
+  userId: string;
+  sock: WASocket | null;
+  status: ConnStatus;
+  lastQr: string | null;
+  lastQrAt: number;
+  pairingCode: string | null;
+  pairingCodeAt: number;
+  lastClose: { code: unknown; detail: string; at: number } | null;
+  generation: number;
+  ownerNumber: string;
 }
 
-// Dashboard me 10-digit number bhi chalega — 91 khud lag jayega.
-// Galat format pe code dusre number ke liye ban jata hai aur phone "couldn't link" bolta hai.
-function normalizePairNumber(raw?: string): string {
-  let d = (raw || getAgentNumber()).replace(/[^0-9]/g, "");
-  d = d.replace(/^0+/, ""); // 077... -> 77...
-  if (d.length === 10) d = "91" + d; // India default country code
-  if (d.length < 10) throw new Error("Poora number dalo — 10 digit ya 91 ke saath (jaise 91XXXXXXXXXX)");
-  return d;
-}
+const sessions = new Map<string, UserSession>();
 
-// QR scan fail ho to ye code phone me type karo:
-// WhatsApp → Linked Devices → Link a Device → "Link with phone number instead"
-export async function requestPairingCode(number?: string): Promise<string> {
-  if (state.status === "connected") throw new Error("Pehle se connected hai");
-  const num = normalizePairNumber(number);
-  console.log(`[wa] pairing code manga gaya number=${num} ke liye`);
-  // Socket open hone ka wait (max ~20 sec) — band socket pe code nahi banta
-  const deadline = Date.now() + 20000;
-  while (Date.now() < deadline) {
-    if ((state.status as string) === "connected") throw new Error("Pehle se connected hai");
-    const open = (state.sock as any)?.ws?.readyState === 1;
-    if (state.sock && open) break;
-    await new Promise((r) => setTimeout(r, 1000));
+export function getSession(userId: string): UserSession {
+  let s = sessions.get(userId);
+  if (!s) {
+    s = {
+      userId, sock: null, status: "disconnected",
+      lastQr: null, lastQrAt: 0, pairingCode: null, pairingCodeAt: 0,
+      lastClose: null, generation: 0, ownerNumber: "",
+    };
+    sessions.set(userId, s);
   }
-  if (!state.sock) throw new Error("Socket ready nahi — Render logs me [wa] lines check karo");
-  try {
-    const code = await state.sock.requestPairingCode(num);
-    state.pairingCode = code;
-    state.pairingCodeAt = Date.now();
-    console.log(`[wa] pairing code: ${code} (1-2 min me phone me dalo)`);
-    return code;
-  } catch (e) {
-    throw new Error(`WhatsApp connection unstable hai (${(e as Error).message}) — 15 sec ruk ke fir try karo`);
-  }
+  return s;
 }
 
-export async function startWhatsApp() {
-  const myGen = ++generation;
-  await restoreAuthFromSupabase(AUTH_DIR);
-  const { state: authState, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+export function allSessions(): UserSession[] {
+  return [...sessions.values()];
+}
+
+function authDir(userId: string): string {
+  return path.join(AUTH_ROOT, userId);
+}
+
+export async function startWhatsApp(userId: string) {
+  const s = getSession(userId);
+  const myGen = ++s.generation;
+  s.ownerNumber = await getOwnerNumber(userId);
+  await restoreAuthFromSupabase(userId, authDir(userId));
+  const { state: authState, saveCreds } = await useMultiFileAuthState(authDir(userId));
   const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
     version,
     auth: authState,
-    // Standard Chrome fingerprint — custom label/version se WhatsApp
-    // pairing reject kar deta hai (companion_platform_display check).
+    // Standard Chrome fingerprint — custom label se pairing reject hota hai
     browser: ["Ubuntu", "Chrome", "120.0.0.0"],
     syncFullHistory: false,
   });
-  state.sock = sock;
+  s.sock = sock;
 
   sock.ev.on("creds.update", async () => {
     await saveCreds();
-    await saveAuthToSupabase(AUTH_DIR, state.status, state.lastQr ?? undefined);
+    await saveAuthToSupabase(userId, authDir(userId), s.status, s.lastQr ?? undefined);
   });
 
   sock.ev.on("connection.update", async (u) => {
-    if (myGen !== generation) return; // purana socket, ignore
+    if (myGen !== s.generation) return; // purana socket, ignore
     const { connection, lastDisconnect, qr } = u;
     if (qr) {
-      state.status = "qr";
-      state.lastQr = qr;
-      state.lastQrAt = Date.now();
-      console.log("[wa] QR mila — 30 sec ke andar scan karo");
-      await setStatus("qr", qr);
-      await saveAuthToSupabase(AUTH_DIR, "qr", qr);
+      s.status = "qr";
+      s.lastQr = qr;
+      s.lastQrAt = Date.now();
+      console.log(`[wa:${userId.slice(0, 8)}] QR mila — 30 sec ke andar scan karo`);
+      await setStatus(userId, "qr", qr);
+      await saveAuthToSupabase(userId, authDir(userId), "qr", qr);
     }
     if (connection === "open") {
-      state.status = "connected";
-      state.lastQr = null;
-      console.log("[wa] Connected! Agent online hai.");
-      await setStatus("connected");
-      await saveAuthToSupabase(AUTH_DIR, "connected");
+      s.status = "connected";
+      s.lastQr = null;
+      console.log(`[wa:${userId.slice(0, 8)}] Connected! Agent online hai.`);
+      await setStatus(userId, "connected");
+      await saveAuthToSupabase(userId, authDir(userId), "connected");
     }
     if (connection === "close") {
       const err = lastDisconnect?.error as any;
       const code = err?.output?.statusCode;
       const loggedOut = code === DisconnectReason.loggedOut;
-      console.log("[wa] Connection closed, code:", code, "loggedOut:", loggedOut, "detail:", err?.message || err);
-      if (myGen !== generation) return;
-      state.status = "disconnected";
-      state.lastClose = { code, detail: String(err?.message || err || ""), at: Date.now() };
-      await setStatus("disconnected");
+      console.log(`[wa:${userId.slice(0, 8)}] closed, code:`, code, "loggedOut:", loggedOut, "detail:", err?.message || err);
+      if (myGen !== s.generation) return;
+      s.status = "disconnected";
+      s.lastClose = { code, detail: String(err?.message || err || ""), at: Date.now() };
+      await setStatus(userId, "disconnected");
       if (!loggedOut) {
-        console.log("[wa] 5 sec me reconnect...");
+        console.log(`[wa:${userId.slice(0, 8)}] 5 sec me reconnect...`);
         setTimeout(() => {
-          if (myGen === generation) startWhatsApp().catch(console.error);
+          if (myGen === s.generation) startWhatsApp(userId).catch(console.error);
         }, 5000);
       } else {
-        console.log("[wa] Logged out — dashboard se 'Naya QR' dabao.");
+        console.log(`[wa:${userId.slice(0, 8)}] Logged out — dashboard se 'Naya QR' dabao.`);
       }
     }
   });
 
   sock.ev.on("messages.upsert", async ({ messages }) => {
-    for (const m of messages) {
-      // apne bheje hue + status broadcast ignore
-      if (m.key.fromMe) continue;
-      if (m.key.remoteJid === "status@broadcast") continue;
-      await handleIncomingMessage(sock, m).catch((e) =>
+    for (const msg of messages) {
+      if (msg.key.fromMe) continue;
+      if (msg.key.remoteJid === "status@broadcast") continue;
+      await handleIncomingMessage(sock, msg, userId).catch((e) =>
         console.error("[wa] handler error:", e)
       );
     }
   });
 }
 
-export async function sendWhatsAppMessage(jid: string, text: string) {
-  if (!state.sock) throw new Error("WhatsApp connected nahi hai");
-  await state.sock.sendMessage(jid, { text });
+// Agent wala SIM number (sirf digits, bina + ke). Pairing code isi pe ayega.
+export function normalizePairNumber(raw?: string): string {
+  let d = (raw || "").replace(/[^0-9]/g, "");
+  d = d.replace(/^0+/, "");
+  if (d.length === 10) d = "91" + d; // India default
+  if (d.length < 10) throw new Error("Poora number dalo — 10 digit ya 91 ke saath (jaise 91XXXXXXXXXX)");
+  return d;
 }
 
-// Dashboard ka "Naya QR" button: aadhi-pairing wala purana session poori tarah
-// saaf karke bilkul fresh QR banao. "Couldn't link device" ka sabse pakka fix.
-export async function resetSession() {
-  generation++; // purane socket ke events dead
+export async function requestPairingCode(userId: string, number?: string): Promise<{ code: string; number: string }> {
+  const s = getSession(userId);
+  if (s.status === "connected") throw new Error("Pehle se connected hai");
+  const num = normalizePairNumber(number);
+  console.log(`[wa:${userId.slice(0, 8)}] pairing code manga gaya number=${num} ke liye`);
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) {
+    if ((s.status as string) === "connected") throw new Error("Pehle se connected hai");
+    const open = (s.sock as any)?.ws?.readyState === 1;
+    if (s.sock && open) break;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  if (!s.sock) throw new Error("Socket ready nahi — 10 sec ruk ke retry karo");
   try {
-    state.sock?.ev.removeAllListeners("connection.update");
-    state.sock?.ev.removeAllListeners("creds.update");
-    state.sock?.ev.removeAllListeners("messages.upsert");
-    (state.sock as any)?.ws?.close?.();
+    const code = await s.sock.requestPairingCode(num);
+    s.pairingCode = code;
+    s.pairingCodeAt = Date.now();
+    console.log(`[wa:${userId.slice(0, 8)}] pairing code: ${code} (1-2 min me phone me dalo)`);
+    return { code, number: num };
+  } catch (e) {
+    throw new Error(`WhatsApp connection unstable hai (${(e as Error).message}) — 15 sec ruk ke fir try karo`);
+  }
+}
+
+// Dashboard ka "Naya QR" button: aadha-fasa session saaf karke fresh pairing
+export async function resetSession(userId: string) {
+  const s = getSession(userId);
+  s.generation++; // purane socket ke events dead
+  try {
+    s.sock?.ev.removeAllListeners("connection.update");
+    s.sock?.ev.removeAllListeners("creds.update");
+    s.sock?.ev.removeAllListeners("messages.upsert");
+    (s.sock as any)?.ws?.close?.();
   } catch {}
-  state.sock = null;
-  state.status = "disconnected";
-  state.lastQr = null;
-  state.pairingCode = null;
-  await fs.rm(AUTH_DIR, { recursive: true, force: true }).catch(() => {});
-  await clearSupabaseSession();
-  console.log("[wa] session reset — fresh QR ban raha hai...");
-  await startWhatsApp();
+  s.sock = null;
+  s.status = "disconnected";
+  s.lastQr = null;
+  s.pairingCode = null;
+  await fs.rm(authDir(userId), { recursive: true, force: true }).catch(() => {});
+  await clearSupabaseSession(userId);
+  console.log(`[wa:${userId.slice(0, 8)}] session reset — fresh QR ban raha hai...`);
+  await startWhatsApp(userId);
+}
+
+export async function sendWhatsAppMessage(userId: string, jid: string, text: string) {
+  const s = getSession(userId);
+  if (!s.sock) throw new Error("WhatsApp connected nahi hai");
+  await s.sock.sendMessage(jid, { text });
+}
+
+// Boot: jin users ki session DB me hai, sab start karo
+export async function startAllSessions() {
+  const users = await listSessionUsers();
+  console.log(`[agent] ${users.length} saved session(s) milin, start kar rahe...`);
+  for (const u of users) {
+    ensureSession(u);
+  }
+}
+
+const starting = new Set<string>();
+
+// Session lazy-start (pehli API call pe) — duplicate socket nahi banega
+export function ensureSession(userId: string) {
+  const s = getSession(userId);
+  if (s.sock || starting.has(userId)) return;
+  starting.add(userId);
+  startWhatsApp(userId)
+    .catch((e) => console.error(`[agent] session start fail ${userId.slice(0, 8)}:`, (e as Error).message))
+    .finally(() => starting.delete(userId));
 }
