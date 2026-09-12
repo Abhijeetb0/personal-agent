@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { nextLeetCodeContest, formatIST } from "./leetcode.js";
+import { nextLeetCodeContest, lastLeetCodeContest, formatIST } from "./leetcode.js";
 
 function sb() {
   const url = process.env.SUPABASE_URL!;
@@ -21,7 +21,21 @@ async function saveReminder(title: string, remindAt: Date, source = "custom") {
   return data;
 }
 
-// "leetcode contest se 30 min pehle" -> minutes nikaalo (default 30)
+// "last contest me kya problems the?" — real list
+export async function tryAnswerLastContestQuery(text: string): Promise<string | null> {
+  if (!/contest/i.test(text)) return null;
+  if (!/(last|pichla|pichhla|previous|ho\s*gaya|latest|kya\s*(problems?|questions?|the|tha))/i.test(text)) return null;
+  if (REMINDER_WORDS.test(text)) return null;
+  try {
+    const last = await lastLeetCodeContest();
+    if (!last || last.questions.length === 0) return "Last contest ke problems abhi nahi mile. Thodi der me fir pucho.";
+    const lines = last.questions.map((q, i) => `${i + 1}. ${q.title}`).join("\n");
+    return `Last contest: ${last.name} (${formatIST(last.startAt)} IST)\nProblems:\n${lines}`;
+  } catch (e) {
+    console.error("[leetcode] last fail:", (e as Error).message);
+    return "Last contest ke problems abhi nahi mil paye. Thodi der me fir pucho.";
+  }
+}
 function minutesBefore(text: string): number {
   const m = text.match(/(\d+)\s*(min|minute)/i);
   return m ? parseInt(m[1], 10) : 30;

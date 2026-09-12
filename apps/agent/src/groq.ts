@@ -27,7 +27,7 @@ export async function getGroqReply(userText: string, history: string[] = []): Pr
       const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model, messages, max_tokens: 800, temperature: 0.7 }),
+        body: JSON.stringify({ model, messages, max_tokens: 400, temperature: 0.7 }),
         signal: AbortSignal.timeout(45000),
       } as any);
       if (!r.ok) {
