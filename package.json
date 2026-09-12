@@ -8,6 +8,7 @@
     "packages/*"
   ],
   "scripts": {
+    "start": "npm start --workspace=apps/agent",
     "dev:agent": "npm run dev --workspace=apps/agent",
     "dev:web": "npm run dev --workspace=apps/web",
     "build": "npm run build --workspaces"
