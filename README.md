@@ -1,51 +1,54 @@
-# Personal Agent — WhatsApp AI (100% free stack)
+# Personal Agent — WhatsApp AI (multi-user, 100% free stack)
 
-Baileys (WhatsApp) + Gemini Flash + Next.js dashboard + Supabase. Sirf **owner number** ko reply karta hai.
+Baileys (WhatsApp) + Groq/Gemini + Next.js + Supabase (Auth + DB).
+Har user ka apna login, apna WhatsApp link, apni memory, apne reminders.
 
-## Tumhe kya karna hai (sirf ye 5 steps)
+## Production setup (sirf ek baar)
 
-### 1. Supabase tables (2 min)
-`supabase.com` → tumhara project → **SQL Editor** → `supabase.sql` (repo root me hai) paste → **Run**.
+### 1. Supabase (2 kaam)
+1. **SQL chalao:** Dashboard → SQL Editor → `supabase-multitenant.sql` paste → Run.
+   (Purani single-user tables rehne do, nayi alag banengi.)
+2. **Email confirm OFF:** Authentication → Sign In/Up → **"Confirm email" OFF** karo.
+   (Nahi to signup ke baad login atkega — free SMTP nahi hai.)
 
-### 2. Env values note karo
-- Supabase → Project Settings → **Data API**: `Project URL` + `publishable key` + `secret key`
-- `aistudio.google.com` → Gemini API key
-- Ek lambi random string socho → `AGENT_API_SECRET` (web + agent dono me same)
-- Dashboard password socho → `DASHBOARD_PASSWORD`
+Keys note karo (Project Settings → Data API): `Project URL`, `publishable key`, `secret key`.
 
-### 3. Agent ko Render pe chalao (free)
-`render.com` → New → **Web Service** → ye repo select karo.
+### 2. Agent → Render (free Web Service)
+Repo push karte hi auto-deploy hoga. Settings verify karo:
 - Build: `npm install --no-audit --no-fund && npm run build --workspace=agent`
-- Start: `npm start --workspace=agent`
-- Environment me ye dalo: `GEMINI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY`,
-  `OWNER_NUMBER=917761815151`, `AGENT_API_SECRET`, `DASHBOARD_PASSWORD` (web ke liye bhi)
-- Deploy ke baad URL milega: `https://personal-agent-xxxx.onrender.com`
-- **Sleep jugaad (free):** `cron-job.org` pe free account → har 5 min me
-  `https://tumhara-url.onrender.com/health` ping karo, warna Render 15 min me so jayega
-  aur reminder late hoga.
+- Start: `npm start` (root se agent start hota hai)
+- Environment:
+  - `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SUPABASE_PUBLISHABLE_KEY`
+  - `GROQ_API_KEY`, `GEMINI_API_KEY` (optional fallback)
+  - `NODE_VERSION=20`
+- **Sleep jugaad:** `cron-job.org` (free) → har 5 min `https://tumhara-url.onrender.com/health` ping.
+  (Render Free 15 min idle pe sota hai — reminder late ho sakta hai.)
 
-### 4. Website ko Vercel pe chalao (free)
-`vercel.com` → New Project → ye repo → **Root Directory = `apps/web`** select karo.
-Env me dalo: `AGENT_BASE_URL=https://tumhara-url.onrender.com`,
-`AGENT_API_SECRET` (same), `DASHBOARD_PASSWORD`.
+### 3. Website → Vercel (free)
+New Project → ye repo → **Root Directory = `apps/web`**. Env:
+- `AGENT_BASE_URL=https://tumhara-agent.onrender.com`
+- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
 
-### 5. Connect + test
-1. Website `/login` → password → `/dashboard` → QR dikhega
-2. **Agent wale number** se WhatsApp → Linked Devices → Link a Device → scan
-3. Status `connected` → apne owner number `917761815151` se agent ko message bhejo
-4. Bolo: *“leetcode contest se 30 min pehle remind kar”* → confirm ayega → time pe reminder ayega
+### 4. Pehla user (tum)
+1. Website kholo → **Signup** (email + password) → Dashboard
+2. **Connect tab:** owner number save karo (jis se agent se baat karoge)
+3. QR scan ya pairing-code se agent wala WhatsApp link karo
+4. Owner number se agent ko `hi` bhejo → reply ayega ✅
+5. Bolo: *“leetcode contest se 30 min pehle remind kar dena”*
 
-## Local me chalana ho to
+Naye users: bas signup → owner number → apna WhatsApp link. Sabka data alag (RLS).
+
+## Local dev
 
 ```bash
-cp .env.example .env   # values bharo, ye file commit mat karo
+cp .env.example .env   # values bharo, commit mat karo
 npm install
-npm run dev:agent   # terminal 1 (http://localhost:3001)
-npm run dev:web     # terminal 2 (http://localhost:3000)
+npm run dev:agent   # :3001 (ALLOW_NO_AUTH=1 se bina-login test)
+npm run dev:web     # :3000
 ```
 
-## Free limits (pehle se pata rakho)
-- Render Free 15 min idle pe sleep → cron-job.org ping lagana (step 3).
-- Baileys unofficial API hai → sirf owner se baat karo, spam mat karo (ban-risk low rahega).
-- Gemini free ~1500 req/day → personal use me enough.
-- Permanent 24x7 chahiye to baad me Oracle Always Free VPS pe shift kar denge — code same rahega.
+## Free limits (pata rakho)
+- Render Free sleep → cron-job ping must hai.
+- Baileys unofficial hai → ek user ek WhatsApp, spam nahi.
+- Groq free limits generous; Gemini free ~1500 req/day backup me.
+- Permanent 24x7 chahiye to baad me Oracle Always Free VPS — code same rahega.

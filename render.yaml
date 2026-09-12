@@ -1,4 +1,4 @@
-# Render — Agent backend (Baileys ko persistent process chahiye, isliye Web Service)
+# Render — Agent backend (multi-user: har user ka apna Baileys socket)
 services:
   - type: web
     name: personal-agent
@@ -11,7 +11,6 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "20"
-      - key: OWNER_NUMBER
-        value: "917761815151"
-      # Baaki secrets Render Dashboard → Environment me dalo (kabhi yaml me mat likho):
-      # GEMINI_API_KEY, SUPABASE_URL, SUPABASE_SECRET_KEY, AGENT_API_SECRET, AUTH_DIR
+      # Baaki secrets Render Dashboard → Environment me dalo (yaml me mat likho):
+      # SUPABASE_URL, SUPABASE_SECRET_KEY, SUPABASE_PUBLISHABLE_KEY,
+      # GROQ_API_KEY, GEMINI_API_KEY (optional)

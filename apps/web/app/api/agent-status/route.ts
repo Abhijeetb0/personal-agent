@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { agentFetch } from "../../../lib/server";
 
-export async function POST() {
-  const r = await agentFetch("/reset", { method: "POST" });
+export async function GET() {
+  const r = await agentFetch("/status");
   return NextResponse.json(r.json, { status: r.status });
 }
