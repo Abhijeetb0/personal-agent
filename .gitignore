@@ -9,3 +9,4 @@ build/
 auth_info/
 *.log
 .DS_Store
+*.tsbuildinfo
