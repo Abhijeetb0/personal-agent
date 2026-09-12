@@ -30,11 +30,11 @@ export function getAgentNumber(): string {
 
 // QR scan fail ho to ye code phone me type karo:
 // WhatsApp → Linked Devices → Link a Device → "Link with phone number instead"
-export async function requestPairingCode(): Promise<string> {
+export async function requestPairingCode(number?: string): Promise<string> {
   if (!state.sock) throw new Error("Socket ready nahi — 10 sec ruk ke retry karo");
   if (state.status === "connected") throw new Error("Pehle se connected hai");
-  const num = getAgentNumber();
-  if (num.length < 10) throw new Error("AGENT_NUMBER env me agent SIM ka poora number dalo (bina + ke)");
+  const num = (number || getAgentNumber()).replace(/[^0-9]/g, "");
+  if (num.length < 10) throw new Error("Agent SIM ka poora number dalo (bina + ke, jaise 91XXXXXXXXXX)");
   const code = await state.sock.requestPairingCode(num);
   state.pairingCode = code;
   state.pairingCodeAt = Date.now();

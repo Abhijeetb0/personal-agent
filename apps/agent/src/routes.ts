@@ -57,10 +57,12 @@ export function buildRoutes() {
     }
   });
 
-  // Pairing code: QR ki jagah phone me 8-digit code type karo
-  app.post("/pairing-code", async (_req, res) => {
+  // Pairing code: QR ki jagah phone me 8-digit code type karo.
+  // Body me { number } bhejo (dashboard se), warna AGENT_NUMBER env use hoga.
+  app.post("/pairing-code", async (req, res) => {
     try {
-      const code = await requestPairingCode();
+      const bodyNum = String((req.body as any)?.number || "").replace(/[^0-9]/g, "");
+      const code = await requestPairingCode(bodyNum || undefined);
       res.json({ ok: true, code });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });

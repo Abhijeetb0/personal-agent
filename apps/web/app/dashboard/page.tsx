@@ -54,14 +54,19 @@ export default function Dashboard() {
   const [pairCode, setPairCode] = useState<string | null>(null);
   const [pairErr, setPairErr] = useState("");
   const [pairLoading, setPairLoading] = useState(false);
+  const [agentNum, setAgentNum] = useState("");
   async function getPairCode() {
     setPairLoading(true);
     setPairErr("");
     try {
-      const r = await fetch("/api/agent-pairing", { method: "POST" });
+      const r = await fetch("/api/agent-pairing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ number: agentNum }),
+      });
       const j = (await r.json()) as { code?: string; error?: string };
       if (r.ok && j.code) setPairCode(j.code);
-      else setPairErr(j.error || "Code nahi bana — pehle Render me AGENT_NUMBER env set karo");
+      else setPairErr(j.error || "Code nahi bana — number check karo");
     } catch {
       setPairErr("Agent se baat nahi ho payi");
     }
@@ -98,9 +103,14 @@ export default function Dashboard() {
       <hr style={{ margin: "28px 0", opacity: 0.2 }} />
       <h2>QR se na ho to — Code se link karo</h2>
       <p style={{ opacity: 0.7, fontSize: 13 }}>
-        Agent wale phone me: WhatsApp → ⋮ → Linked Devices → Link a Device → neeche
-        “Link with phone number instead” → waha ye 8-digit code 1-2 min me type karo.
+        Pehle agent wale SIM ka number dalo (bina + ke, jaise 91XXXXXXXXXX), fir code lo.
+        Us phone me: WhatsApp → ⋮ → Linked Devices → Link a Device → neeche
+        “Link with phone number instead” → ye 8-digit code 1-2 min me type karo.
       </p>
+      <input value={agentNum} onChange={(e) => setAgentNum(e.currentTarget.value)}
+        placeholder="91XXXXXXXXXX"
+        inputMode="numeric"
+        style={{ width: "100%", padding: 10, borderRadius: 8, marginBottom: 8 }} />
       <button onClick={getPairCode} disabled={pairLoading}
         style={{ padding: "10px 16px", borderRadius: 8, cursor: "pointer" }}>
         {pairLoading ? "Code ban raha hai..." : "Pairing code lo"}
