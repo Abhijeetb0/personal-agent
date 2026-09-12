@@ -38,7 +38,7 @@ export async function requestPairingCode(number?: string): Promise<string> {
   // Socket open hone ka wait (max ~20 sec) — band socket pe code nahi banta
   const deadline = Date.now() + 20000;
   while (Date.now() < deadline) {
-    if (state.status === "connected") throw new Error("Pehle se connected hai");
+    if ((state.status as string) === "connected") throw new Error("Pehle se connected hai");
     const open = (state.sock as any)?.ws?.readyState === 1;
     if (state.sock && open) break;
     await new Promise((r) => setTimeout(r, 1000));
