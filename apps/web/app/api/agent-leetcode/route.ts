@@ -5,10 +5,8 @@ const SECRET = process.env.AGENT_API_SECRET || "";
 
 export async function GET() {
   try {
-    const r = await fetch(`${AGENT}/leetcode/next`, {
-      headers: SECRET ? { "x-agent-secret": SECRET } : {},
-      cache: "no-store",
-    });
+    const h: Record<string, string> = SECRET ? { "x-agent-secret": SECRET } : {};
+    const r = await fetch(`${AGENT}/leetcode/next`, { headers: h });
     return NextResponse.json(await r.json(), { status: r.status });
   } catch (e) {
     return NextResponse.json({ contest: null, error: (e as Error).message }, { status: 502 });

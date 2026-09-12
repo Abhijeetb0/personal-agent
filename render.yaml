@@ -1,0 +1,17 @@
+# Render — Agent backend (Baileys ko persistent process chahiye, isliye Web Service)
+services:
+  - type: web
+    name: personal-agent
+    runtime: node
+    plan: free
+    rootDir: .
+    buildCommand: npm install --no-audit --no-fund && npm run build --workspace=agent
+    startCommand: npm start --workspace=agent
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: OWNER_NUMBER
+        value: "917761815151"
+      # Baaki secrets Render Dashboard → Environment me dalo (kabhi yaml me mat likho):
+      # GEMINI_API_KEY, SUPABASE_URL, SUPABASE_SECRET_KEY, AGENT_API_SECRET, AUTH_DIR

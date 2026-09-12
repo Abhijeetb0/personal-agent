@@ -23,7 +23,7 @@ export default function Login() {
         <input
           type="password"
           value={pw}
-          onChange={(e) => setPw(e.target.value)}
+          onChange={(e) => setPw(e.currentTarget.value)}
           placeholder="password"
           style={{ width: "100%", padding: 12, borderRadius: 8, border: "1px solid #333" }}
         />

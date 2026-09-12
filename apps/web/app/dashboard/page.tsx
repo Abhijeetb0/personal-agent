@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 
 type QrResp = { status: string; qr: string | null; dataUrl: string | null };
 type Reminder = { id: string; title: string; remindAt: string; sent: boolean; source: string };
+type Contest = { name: string; startAt: string; startIST: string; url: string } | null;
 
 export default function Dashboard() {
   const [data, setData] = useState<QrResp | null>(null);
@@ -10,16 +11,19 @@ export default function Dashboard() {
   const [text, setText] = useState("Hello! Agent test message");
   const [msg, setMsg] = useState("");
   const [rems, setRems] = useState<Reminder[]>([]);
-  const [contest, setContest] = useState<any>(null);
+  const [contest, setContest] = useState<Contest>(null);
 
   async function load() {
     try {
-      const r = await fetch("/api/agent-qr", { cache: "no-store" });
-      if (r.ok) setData(await r.json());
-      const r2 = await fetch("/api/agent-reminders", { cache: "no-store" });
-      if (r2.ok) setRems(((await r2.json()).reminders ?? []) as Reminder[]);
-      const r3 = await fetch("/api/agent-leetcode", { cache: "no-store" });
-      if (r3.ok) setContest((await r3.json()).contest);
+      const r = await fetch("/api/agent-qr");
+      if (r.ok) setData((await r.json()) as QrResp);
+      const r2 = await fetch("/api/agent-reminders");
+      if (r2.ok) {
+        const j = (await r2.json()) as { reminders?: Reminder[] };
+        setRems(j.reminders ?? []);
+      }
+      const r3 = await fetch("/api/agent-leetcode");
+      if (r3.ok) setContest(((await r3.json()) as { contest: Contest }).contest);
     } catch {}
   }
   useEffect(() => {
@@ -57,9 +61,9 @@ export default function Dashboard() {
 
       <hr style={{ margin: "28px 0", opacity: 0.2 }} />
       <h2>Test message</h2>
-      <input value={to} onChange={(e) => setTo(e.target.value)}
+      <input value={to} onChange={(e) => setTo(e.currentTarget.value)}
         style={{ width: "100%", padding: 10, borderRadius: 8, marginBottom: 8 }} />
-      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3}
+      <textarea value={text} onChange={(e) => setText(e.currentTarget.value)} rows={3}
         style={{ width: "100%", padding: 10, borderRadius: 8 }} />
       <button onClick={sendTest} style={{ marginTop: 8, padding: "10px 16px", borderRadius: 8, cursor: "pointer" }}>
         Send
