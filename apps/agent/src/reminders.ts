@@ -7,7 +7,7 @@ function sb() {
   return createClient(url, key);
 }
 
-async function saveReminder(title: string, remindAt: Date, source = "custom") {
+export async function saveReminder(title: string, remindAt: Date, source = "custom") {
   if (!process.env.SUPABASE_URL) {
     console.log(`[reminder] (no DB) ${title} @ ${remindAt.toISOString()}`);
     return { id: "local", title, remindAt };

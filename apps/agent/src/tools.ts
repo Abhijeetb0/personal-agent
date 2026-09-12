@@ -25,7 +25,7 @@ function extractWikiTopic(text: string): string | null {
   return words.join(" ");
 }
 
-async function wikiSummary(topic: string): Promise<string | null> {
+export async function wikiSummary(topic: string): Promise<string | null> {
   for (const lang of ["en", "hi"]) {
     try {
       const s = await fetch(
