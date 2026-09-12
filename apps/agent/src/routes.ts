@@ -1,7 +1,9 @@
 import express from "express";
 import cors from "cors";
 import QRCode from "qrcode";
+import { createClient } from "@supabase/supabase-js";
 import { state, sendWhatsAppMessage } from "./baileys.js";
+import { nextLeetCodeContest, formatIST } from "./leetcode.js";
 
 export function buildRoutes() {
   const app = express();
@@ -43,6 +45,42 @@ export function buildRoutes() {
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }
+  });
+
+  const sb = () => {
+    const url = process.env.SUPABASE_URL!;
+    const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_PUBLISHABLE_KEY!;
+    return createClient(url, key);
+  };
+
+  // Dashboard: reminders list
+  app.get("/reminders", async (_req, res) => {
+    try {
+      const { data } = await sb()
+        .from("Reminder")
+        .select("id,title,remindAt,sent,source")
+        .order("remindAt", { ascending: true })
+        .limit(50);
+      res.json({ reminders: data ?? [] });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  app.delete("/reminders/:id", async (req, res) => {
+    try {
+      await sb().from("Reminder").delete().eq("id", req.params.id);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  // Dashboard: next leetcode contest dekho
+  app.get("/leetcode/next", async (_req, res) => {
+    const c = await nextLeetCodeContest();
+    if (!c) return res.json({ contest: null });
+    res.json({ contest: { name: c.name, startAt: c.startAt, startIST: formatIST(c.startAt), url: c.url } });
   });
 
   return app;

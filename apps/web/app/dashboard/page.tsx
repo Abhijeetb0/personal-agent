@@ -2,17 +2,24 @@
 import { useEffect, useState } from "react";
 
 type QrResp = { status: string; qr: string | null; dataUrl: string | null };
+type Reminder = { id: string; title: string; remindAt: string; sent: boolean; source: string };
 
 export default function Dashboard() {
   const [data, setData] = useState<QrResp | null>(null);
   const [to, setTo] = useState("917761815151");
   const [text, setText] = useState("Hello! Agent test message");
   const [msg, setMsg] = useState("");
+  const [rems, setRems] = useState<Reminder[]>([]);
+  const [contest, setContest] = useState<any>(null);
 
   async function load() {
     try {
       const r = await fetch("/api/agent-qr", { cache: "no-store" });
       if (r.ok) setData(await r.json());
+      const r2 = await fetch("/api/agent-reminders", { cache: "no-store" });
+      if (r2.ok) setRems(((await r2.json()).reminders ?? []) as Reminder[]);
+      const r3 = await fetch("/api/agent-leetcode", { cache: "no-store" });
+      if (r3.ok) setContest((await r3.json()).contest);
     } catch {}
   }
   useEffect(() => {
@@ -58,6 +65,28 @@ export default function Dashboard() {
         Send
       </button>
       {msg && <p>{msg}</p>}
+
+      <hr style={{ margin: "28px 0", opacity: 0.2 }} />
+      <h2>Next LeetCode Contest</h2>
+      {contest ? (
+        <p>{contest.name} — {contest.startIST} IST</p>
+      ) : (
+        <p style={{ opacity: 0.7 }}>Load ho raha hai...</p>
+      )}
+      <p style={{ opacity: 0.7, fontSize: 13 }}>WhatsApp pe bolo: “leetcode contest se 30 min pehle remind kar”</p>
+
+      <h2>Reminders ({rems.filter((r) => !r.sent).length} pending)</h2>
+      {rems.length === 0 ? (
+        <p style={{ opacity: 0.7 }}>Koi reminder nahi hai.</p>
+      ) : (
+        <ul>
+          {rems.map((r) => (
+            <li key={r.id} style={{ marginBottom: 6 }}>
+              {r.sent ? "✅ " : "⏰ "}{r.title} — {new Date(r.remindAt).toLocaleString("en-IN")} [{r.source}]
+            </li>
+          ))}
+        </ul>
+      )}
 
       <p style={{ marginTop: 32, opacity: 0.6, fontSize: 13 }}>
         Owner (whitelist): 917761815151 — sirf isi ko agent reply karega.
