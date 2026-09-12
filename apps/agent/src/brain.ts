@@ -4,6 +4,7 @@ import {
 } from "./leetcode.js";
 import { saveReminder } from "./reminders.js";
 import { wikiSummary, tryAnswerNewsQuery } from "./tools.js";
+import { saveMemory, forgetMemory, recallMemories } from "./memory.js";
 import { ddgSearch, searchContextBlock } from "./web.js";
 
 const BRAIN_SYSTEM = `Tum user ka personal WhatsApp assistant ho. Hinglish me short reply do (2-4 lines, WhatsApp style).
@@ -26,6 +27,8 @@ Tumhare paas ye TOOLS hain. Har jawab SIRF JSON me do, aur kuch nahi:
 4. wiki — args: {"topic":"..."} — kisi cheez ki definition/background
 5. web_search — args: {"query":"..."} — fresh/info sawal (news, rate, score, capital, facts)
 6. news — args: {} — aaj ki top headlines
+7. remember — args: {"fact":"..."} — user ki pakki baat long-term yaad rakho (naam, pasand, team, goals; "yaad rakhna" bole to LAZMI)
+8. forget — args: {"keyword":"..."} — "bhool jao" bole to matching yaad mitao
 
 Rules:
 - Tool result milne ke baad use padh ke user ko Hinglish me jawab do (JSON nahi, seedha text reply action me).
@@ -116,6 +119,12 @@ async function runTool(name: string, args: Record<string, any>): Promise<string>
       const n = await tryAnswerNewsQuery("news");
       return n || "ERROR: headlines nahi mili.";
     }
+    case "remember": {
+      return await saveMemory(String(args.fact || ""));
+    }
+    case "forget": {
+      return await forgetMemory(String(args.keyword || ""));
+    }
     default:
       return `ERROR: unknown tool "${name}".`;
   }
@@ -131,7 +140,10 @@ function toRoleMsgs(history: string[]): ChatMsg[] {
 
 export async function brainReply(userText: string, history: string[] = []): Promise<string> {
   const nowIST = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
-  const system = BRAIN_SYSTEM.replace("{NOW_IST}", nowIST);
+  // Long-term memory: jude facts (chhote, token-light)
+  const mems = await recallMemories(userText);
+  const memBlock = mems.length ? `\n\nUSER KI PAKKI BAATEIN (long-term memory, inhe yaad rakho):\n${mems.map((m, i) => `${i + 1}. ${m}`).join("\n")}` : "";
+  const system = BRAIN_SYSTEM.replace("{NOW_IST}", nowIST) + memBlock;
   const msgs: ChatMsg[] = [
     { role: "system", content: system },
     ...toRoleMsgs(history),

@@ -39,3 +39,11 @@ create index if not exists "Reminder_sent_remind_idx" on "Reminder" (sent, "remi
 insert into "Setting" ("userId", "ownerNumber")
 values ('owner', '917761815151')
 on conflict ("userId") do nothing;
+
+-- Long-term memory (v2): user ki pakki baatein
+create table if not exists "Memory" (
+  id text primary key default gen_random_uuid()::text,
+  fact text not null,
+  "createdAt" timestamptz default now()
+);
+create index if not exists "Memory_created_idx" on "Memory" ("createdAt");
