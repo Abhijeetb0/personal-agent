@@ -1,29 +1,40 @@
 import type { WASocket, WAMessage } from "@whiskeysockets/baileys";
+import { extractText, senderNumber } from "./handler.utils.js";
+import { isOwner } from "./whitelist.js";
+import { getReply } from "./gemini.js";
+import { logMessage, recentHistory } from "./db.js";
+import { tryHandleReminderCommand } from "./reminders.js";
 
-// Step-2 me sirf structure. Step-4 (whitelist+gemini) me AI reply judhega,
-// Step-5 me reminder logic judhega. Abhi: message log + owner check ka skeleton.
-export function extractText(m: WAMessage): string {
-  return (
-    m.message?.conversation ||
-    m.message?.extendedTextMessage?.text ||
-    m.message?.imageMessage?.caption ||
-    ""
-  ).trim();
-}
-
-export function senderNumber(m: WAMessage): string {
-  // remoteJid like 917761815151@s.whatsapp.net (group me participant alag)
-  const jid = m.key.participant || m.key.remoteJid || "";
-  return jid.split("@")[0].replace(/[^0-9]/g, "");
-}
-
-export async function handleIncomingMessage(_sock: WASocket, m: WAMessage) {
+export async function handleIncomingMessage(sock: WASocket, m: WAMessage) {
   const text = extractText(m);
   const from = senderNumber(m);
-  if (!text) return;
-  const owner = (process.env.OWNER_NUMBER || "917761815151").replace(/[^0-9]/g, "");
-  const isOwner = from === owner || from.endsWith(owner.slice(-10));
-  console.log(`[msg] from=${from} isOwner=${isOwner} text=${text.slice(0, 80)}`);
-  // TODO step-4: non-owner -> ignore + DB log; owner -> gemini reply
-  // TODO step-5: reminder intent -> scheduler
+  if (!text || !from) return;
+
+  // 1. Whitelist: sirf owner ko reply
+  if (!isOwner(from)) {
+    console.log(`[guard] non-owner ${from} ignored`);
+    await logMessage(from, text, null, false);
+    return;
+  }
+
+  // 2. Reminder command? ("leetcode contest se 30 min pehle remind kar")
+  const reminderResp = await tryHandleReminderCommand(text);
+  if (reminderResp) {
+    await sock.sendMessage(m.key.remoteJid!, { text: reminderResp });
+    await logMessage(from, text, reminderResp, true);
+    return;
+  }
+
+  // 3. Normal chat -> Gemini
+  try {
+    const history = await recentHistory(from);
+    const reply = await getReply(text, history);
+    await sock.sendMessage(m.key.remoteJid!, { text: reply });
+    await logMessage(from, text, reply, true);
+  } catch (e) {
+    console.error("[gemini] fail:", (e as Error).message);
+    await sock.sendMessage(m.key.remoteJid!, {
+      text: "Abhi thoda issue hai, 1 min me fir bolo. (AI key/limit check karo)",
+    });
+  }
 }
