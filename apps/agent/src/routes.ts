@@ -62,8 +62,9 @@ export function buildRoutes() {
   app.post("/pairing-code", async (req, res) => {
     try {
       const bodyNum = String((req.body as any)?.number || "").replace(/[^0-9]/g, "");
-      const code = await requestPairingCode(bodyNum || undefined);
-      res.json({ ok: true, code });
+      const num = bodyNum || getAgentNumber();
+      const code = await requestPairingCode(num);
+      res.json({ ok: true, code, number: num });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }

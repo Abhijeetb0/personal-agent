@@ -52,21 +52,26 @@ export default function Dashboard() {
   }
 
   const [pairCode, setPairCode] = useState<string | null>(null);
+  const [pairNumber, setPairNumber] = useState<string | null>(null);
   const [pairErr, setPairErr] = useState("");
   const [pairLoading, setPairLoading] = useState(false);
   const [agentNum, setAgentNum] = useState("");
   async function getPairCode() {
     setPairLoading(true);
     setPairErr("");
+    setPairCode(null);
+    setPairNumber(null);
     try {
       const r = await fetch("/api/agent-pairing", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ number: agentNum }),
       });
-      const j = (await r.json()) as { code?: string; error?: string };
-      if (r.ok && j.code) setPairCode(j.code);
-      else setPairErr(j.error || "Code nahi bana — number check karo");
+      const j = (await r.json()) as { code?: string; number?: string; error?: string };
+      if (r.ok && j.code) {
+        setPairCode(j.code);
+        setPairNumber(j.number ?? null);
+      } else setPairErr(j.error || "Code nahi bana — number check karo");
     } catch {
       setPairErr("Agent se baat nahi ho payi");
     }
@@ -116,7 +121,13 @@ export default function Dashboard() {
         {pairLoading ? "Code ban raha hai..." : "Pairing code lo"}
       </button>
       {pairCode && (
-        <p style={{ fontSize: 32, letterSpacing: 6, fontWeight: "bold" }}>{pairCode}</p>
+        <>
+          <p style={{ fontSize: 32, letterSpacing: 6, fontWeight: "bold" }}>{pairCode}</p>
+          <p style={{ color: "#ffd97d" }}>
+            Ye code <b>{pairNumber}</b> ke liye bana hai — code USI number wale phone me type karo,
+            kisi aur phone me nahi. 1-2 min me expire ho jayega.
+          </p>
+        </>
       )}
       {pairErr && <p style={{ color: "#ff8080" }}>{pairErr}</p>}
 
