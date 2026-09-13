@@ -14,7 +14,12 @@ function modelList(): string[] {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  const defaults = ["groq/compound-mini", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
+  const defaults = [
+    "groq/compound-mini",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.6-27b",
+  ];
   const merged = list.length ? list : defaults;
   return [...new Set(merged)];
 }
@@ -22,9 +27,33 @@ function modelList(): string[] {
 // 429/rate-limit wala model thodi der ke liye skip (cooldown), taaki har call pe dead model pe time waste na ho
 const cooldowns = new Map<string, number>();
 const COOLDOWN_MS = 60_000;
+const DEAD_MODEL_COOLDOWN_MS = 60 * 60_000; // 404/decommissioned model dobara try karne ka koi fayda nahi
 
 function isRateLimitMsg(msg: string): boolean {
   return /429|rate.?limit|rate_limit|quota|too many requests/i.test(msg);
+}
+
+// 404 / model_not_found / decommissioned = ye ID mar chuka hai, retry bekar
+function isDeadModelMsg(msg: string): boolean {
+  return /404|model_not_found|model .* not (found|exist|available)|decommission|deprecated|no longer supported/i.test(msg);
+}
+
+// Startup pe live model IDs Render logs me dikhao — 404 debug karna aasan
+export async function logAvailableModels(): Promise<void> {
+  const key = process.env.GROQ_API_KEY || "";
+  if (!key) return;
+  try {
+    const r = await fetch("https://api.groq.com/openai/v1/models", {
+      headers: { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(15000),
+    } as any);
+    if (!r.ok) throw new Error(`models ${r.status}`);
+    const j = (await r.json()) as any;
+    const ids = (j?.data ?? []).map((m: any) => m.id).filter(Boolean).sort();
+    console.log(`[groq] live models (${ids.length}): ${ids.join(", ")}`);
+  } catch (e) {
+    console.error("[groq] live model list nahi mili:", (e as Error).message.slice(0, 100));
+  }
 }
 
 async function callOneModel(key: string, model: string, messages: ChatMsg[], maxTokens: number): Promise<string> {
@@ -76,6 +105,12 @@ export async function groqChat(messages: ChatMsg[], maxTokens = 400): Promise<st
       lastErr = e;
       const msg = (e as Error).message || "";
       console.error(`[groq] fail [${model}]:`, msg.slice(0, 120));
+      if (isDeadModelMsg(msg)) {
+        // mara hua model: retry bekar, 1h cooldown + turant agla model
+        console.error(`[groq] dead model [${model}], 1h skip`);
+        cooldowns.set(model, Date.now() + DEAD_MODEL_COOLDOWN_MS);
+        continue;
+      }
       if (isRateLimitMsg(msg)) {
         // rate-limit pe BINA RUKE agle model pe jao, is model ko cooldown me dalo
         cooldowns.set(model, Date.now() + COOLDOWN_MS);

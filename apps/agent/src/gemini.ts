@@ -16,7 +16,7 @@ function getModels() {
   if (!key) throw new Error("GEMINI_API_KEY missing");
   const gen = new GoogleGenerativeAI(key);
   // pehla primary, baaki 429/quota pe fallback (alag quota pool)
-  const names = [process.env.GEMINI_MODEL || "gemini-2.0-flash", "gemini-2.0-flash-lite"];
+  const names = [process.env.GEMINI_MODEL || "gemini-2.5-flash", "gemini-2.5-flash-lite"];
   models = names.map((m) => gen.getGenerativeModel({ model: m, systemInstruction: SYSTEM }));
   return models;
 }
