@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 dotenv.config();
+import logger from "./logger.js";
 import { buildRoutes } from "./routes.js";
 import { startAllSessions } from "./baileys.js";
 import { startScheduler } from "./scheduler.js";
@@ -9,11 +10,11 @@ const PORT = Number(process.env.PORT || 3001);
 const app = buildRoutes();
 
 app.listen(PORT, () => {
-  console.log(`[agent] multi-user API http://localhost:${PORT}`);
+  logger.info({ port: PORT }, "[agent] multi-user API started");
 });
 
-startAllSessions().catch((e) => console.error("[agent] boot sessions failed:", e));
+startAllSessions().catch((e) => logger.error({ err: e }, "[agent] boot sessions failed"));
 
-logAvailableModels().catch(() => {}); // non-blocking, sirf logs ke liye
+logAvailableModels().catch(() => {});
 
 startScheduler();

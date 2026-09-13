@@ -1,4 +1,5 @@
 import type { WASocket, WAMessage } from "@whiskeysockets/baileys";
+import logger from "./logger.js";
 import { extractText, senderNumber } from "./handler.utils.js";
 import { isOwner } from "./whitelist.js";
 import { getAiReply } from "./ai.js";
@@ -18,7 +19,7 @@ export async function handleIncomingMessage(sock: WASocket, m: WAMessage, userId
 
   // 1. Whitelist: sirf owner ko reply
   if (!(await isOwner(sock, from, rawJid, owner))) {
-    console.log(`[guard] non-owner ${from} (${rawJid}) ignored`);
+    logger.info({ from, rawJid }, "[guard] non-owner ignored");
     await logMessage(userId, from, text, null, false);
     return;
   }
@@ -33,24 +34,24 @@ export async function handleIncomingMessage(sock: WASocket, m: WAMessage, userId
       return;
     }
   } catch (e) {
-    console.error("[fastlane] fail:", (e as Error).message);
+    logger.error({ err: e }, "[fastlane] fail");
   }
 
   // 3. Brain: samjho -> tool chahiye to chalao -> jawab do
   try {
-    console.log(`[msg] brain soch raha...`);
+    logger.info("[msg] brain soch raha...");
     const history = await recentHistory(userId, from);
     let reply = await getAiReply(text, history, userId);
     // Aakhri safety net: kachcha protocol JSON user ko KABHI nahi
     if (reply.trim().startsWith("{")) {
-      console.error("[guard] protocol leak pakda, salvage kar rahe...");
+      logger.error("[guard] protocol leak pakda, salvage kar rahe...");
       reply = salvageProtocolText(reply) ?? "Lamba jawab adhoora kat gaya — thoda chhota karke mango (jaise 500 words me).";
     }
-    console.log(`[msg] reply ready (${reply.length} chars), bhej rahe...`);
+    logger.info({ chars: reply.length }, "[msg] reply ready");
     await sock.sendMessage(m.key.remoteJid!, { text: reply });
     await logMessage(userId, from, text, reply, true);
   } catch (e) {
-    console.error("[ai] fail:", (e as Error).message);
+    logger.error({ err: e }, "[ai] fail");
     // AI down? factual sawal ho to search snippets hi bhej do — khaali haath nahi.
     // Creative kaam (likho/banao/essay) me search snippets kachra lagte hain ("Viral girl" jaisa), waha seedha issue bolo.
     let fallback = "Abhi thoda issue hai, 1 min me fir bolo. (AI key/limit check karo)";

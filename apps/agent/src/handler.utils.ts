@@ -1,5 +1,6 @@
 import type { WAMessage, WASocket } from "@whiskeysockets/baileys";
 import { isLidUser } from "@whiskeysockets/baileys";
+import logger from "./logger.js";
 import { normalize } from "./whitelist.js";
 
 export function extractText(m: WAMessage): string {
@@ -18,11 +19,11 @@ export async function senderNumber(sock: WASocket, m: WAMessage): Promise<string
   if (isLidUser(jid)) {
     try {
       const pn = await sock.signalRepository.lidMapping.getPNForLID(jid);
-      console.log(`[lid-debug] jid=${jid} pn=${pn}`);
+      logger.info({ jid, pn }, "[lid-debug]");
       if (pn) return normalize(pn);
-      console.log(`[lid] PN mapping nahi mili: ${jid}`);
+      logger.info({ jid }, "[lid] PN mapping nahi mili");
     } catch (e) {
-      console.error("[lid] resolve fail:", (e as Error).message);
+      logger.error({ err: e }, "[lid] resolve fail");
     }
   }
   return normalize(jid);

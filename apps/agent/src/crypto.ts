@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import logger from "./logger.js";
 
 // WaSession.auth_blob encryption (AES-256-GCM) — DB compromise != WhatsApp compromise.
 // Key: AGENT_ENC_KEY env (64 hex chars). Key nahi to plaintext + warning (purana behavior).
@@ -12,7 +13,7 @@ function encKey(): Buffer | null {
   if (!/^[0-9a-fA-F]{64}$/.test(hex)) {
     if (!warned) {
       warned = true;
-      console.error("[crypto] AGENT_ENC_KEY galat format (64 hex chars chahiye) — plaintext mode");
+      logger.warn("[crypto] AGENT_ENC_KEY galat format (64 hex chars chahiye) — plaintext mode");
     }
     return null;
   }
@@ -25,7 +26,7 @@ export function encryptJson(obj: unknown): Record<string, unknown> {
   if (!key) {
     if (!warned) {
       warned = true;
-      console.error("[crypto] AGENT_ENC_KEY nahi — auth_blob PLAINTEXT save ho raha hai");
+      logger.warn("[crypto] AGENT_ENC_KEY nahi — auth_blob PLAINTEXT save ho raha hai");
     }
     return blob;
   }

@@ -6,6 +6,7 @@ import makeWASocket, {
 import type { WASocket } from "@whiskeysockets/baileys";
 import path from "node:path";
 import fs from "node:fs/promises";
+import logger from "./logger.js";
 import {
   restoreAuthFromSupabase, saveAuthToSupabase, setStatus,
   clearSupabaseSession, listSessionUsers, getOwnerNumber,
@@ -81,14 +82,14 @@ export async function startWhatsApp(userId: string) {
       s.status = "qr";
       s.lastQr = qr;
       s.lastQrAt = Date.now();
-      console.log(`[wa:${userId.slice(0, 8)}] QR mila — 30 sec ke andar scan karo`);
+      logger.info({ userId: userId.slice(0, 8) }, "[wa] QR mila — 30 sec ke andar scan karo");
       await setStatus(userId, "qr", qr);
       await saveAuthToSupabase(userId, authDir(userId), "qr", qr);
     }
     if (connection === "open") {
       s.status = "connected";
       s.lastQr = null;
-      console.log(`[wa:${userId.slice(0, 8)}] Connected! Agent online hai.`);
+      logger.info({ userId: userId.slice(0, 8) }, "[wa] Connected!");
       await setStatus(userId, "connected");
       await saveAuthToSupabase(userId, authDir(userId), "connected");
     }
@@ -96,18 +97,18 @@ export async function startWhatsApp(userId: string) {
       const err = lastDisconnect?.error as any;
       const code = err?.output?.statusCode;
       const loggedOut = code === DisconnectReason.loggedOut;
-      console.log(`[wa:${userId.slice(0, 8)}] closed, code:`, code, "loggedOut:", loggedOut, "detail:", err?.message || err);
+      logger.info({ userId: userId.slice(0, 8), code, loggedOut, detail: err?.message || err }, "[wa] closed");
       if (myGen !== s.generation) return;
       s.status = "disconnected";
       s.lastClose = { code, detail: String(err?.message || err || ""), at: Date.now() };
       await setStatus(userId, "disconnected");
       if (!loggedOut) {
-        console.log(`[wa:${userId.slice(0, 8)}] 5 sec me reconnect...`);
+        logger.info({ userId: userId.slice(0, 8) }, "[wa] 5 sec me reconnect...");
         setTimeout(() => {
-          if (myGen === s.generation) startWhatsApp(userId).catch(console.error);
+          if (myGen === s.generation) startWhatsApp(userId).catch((e) => logger.error({ err: e }, "[wa] reconnect fail"));
         }, 5000);
       } else {
-        console.log(`[wa:${userId.slice(0, 8)}] Logged out — dashboard se 'Naya QR' dabao.`);
+        logger.info({ userId: userId.slice(0, 8) }, "[wa] Logged out — dashboard se 'Naya QR' dabao");
       }
     }
   });
@@ -117,7 +118,7 @@ export async function startWhatsApp(userId: string) {
       if (msg.key.fromMe) continue;
       if (msg.key.remoteJid === "status@broadcast") continue;
       await handleIncomingMessage(sock, msg, userId).catch((e) =>
-        console.error("[wa] handler error:", e)
+        logger.error({ err: e }, "[wa] handler error")
       );
     }
   });
@@ -136,7 +137,7 @@ export async function requestPairingCode(userId: string, number?: string): Promi
   const s = getSession(userId);
   if (s.status === "connected") throw new Error("Pehle se connected hai");
   const num = normalizePairNumber(number);
-  console.log(`[wa:${userId.slice(0, 8)}] pairing code manga gaya number=${num} ke liye`);
+  logger.info({ userId: userId.slice(0, 8), number: num }, "[wa] pairing code manga gaya");
   const deadline = Date.now() + 20000;
   while (Date.now() < deadline) {
     if ((s.status as string) === "connected") throw new Error("Pehle se connected hai");
@@ -149,7 +150,7 @@ export async function requestPairingCode(userId: string, number?: string): Promi
     const code = await s.sock.requestPairingCode(num);
     s.pairingCode = code;
     s.pairingCodeAt = Date.now();
-    console.log(`[wa:${userId.slice(0, 8)}] pairing code: ${code} (1-2 min me phone me dalo)`);
+    logger.info({ userId: userId.slice(0, 8), code }, "[wa] pairing code ready");
     return { code, number: num };
   } catch (e) {
     throw new Error(`WhatsApp connection unstable hai (${(e as Error).message}) — 15 sec ruk ke fir try karo`);
@@ -172,7 +173,7 @@ export async function resetSession(userId: string) {
   s.pairingCode = null;
   await fs.rm(authDir(userId), { recursive: true, force: true }).catch(() => {});
   await clearSupabaseSession(userId);
-  console.log(`[wa:${userId.slice(0, 8)}] session reset — fresh QR ban raha hai...`);
+  logger.info({ userId: userId.slice(0, 8) }, "[wa] session reset — fresh QR ban raha hai...");
   await startWhatsApp(userId);
 }
 
@@ -185,7 +186,7 @@ export async function sendWhatsAppMessage(userId: string, jid: string, text: str
 // Boot: jin users ki session DB me hai, sab start karo
 export async function startAllSessions() {
   const users = await listSessionUsers();
-  console.log(`[agent] ${users.length} saved session(s) milin, start kar rahe...`);
+  logger.info({ count: users.length }, "[agent] saved sessions milin, start kar rahe...");
   for (const u of users) {
     ensureSession(u);
   }
@@ -199,6 +200,6 @@ export function ensureSession(userId: string) {
   if (s.sock || starting.has(userId)) return;
   starting.add(userId);
   startWhatsApp(userId)
-    .catch((e) => console.error(`[agent] session start fail ${userId.slice(0, 8)}:`, (e as Error).message))
+    .catch((e) => logger.error({ userId: userId.slice(0, 8), err: e }, "[agent] session start fail"))
     .finally(() => starting.delete(userId));
 }

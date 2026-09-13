@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { ChatMsg } from "./groq.js";
+import logger from "./logger.js";
 
 const SYSTEM = `Tum user ka personal WhatsApp assistant ho. Hinglish me short, friendly reply do.
 Tumhari capabilities: normal baat-cheet, sawalon ke jawab apni knowledge se, reminders, LeetCode contest info, time/date.
@@ -52,7 +53,7 @@ export async function geminiChat(messages: ChatMsg[], maxTokens = 500): Promise<
   let lastErr: unknown = null;
   for (const name of ordered) {
     if ((gCool.get(name) ?? 0) > now) {
-      console.log(`[gemini] skip [${name}] cooldown`);
+      logger.info({ model: name }, "[gemini] skip (cooldown)");
       continue;
     }
     try {
@@ -68,7 +69,7 @@ export async function geminiChat(messages: ChatMsg[], maxTokens = 500): Promise<
     } catch (e) {
       lastErr = e;
       const msg = (e as Error).message || "";
-      console.error(`[gemini] fail [${name}]:`, msg.slice(0, 120));
+      logger.error({ model: name, err: msg.slice(0, 120) }, "[gemini] fail");
       if (/401|403|api[_ ]?key|permission/i.test(msg)) break; // key hi galat — dusra model bekar
       if (/404|not.?found|not.?supported/i.test(msg)) {
         gCool.set(name, Date.now() + 3600_000);
@@ -96,7 +97,7 @@ export async function getReply(userText: string, history: string[] = []): Promis
       } catch (e) {
         lastErr = e;
         const msg = (e as Error).message || "";
-        console.error(`[gemini] fail (attempt ${attempt + 1}):`, msg.slice(0, 160));
+        logger.error({ attempt: attempt + 1, err: msg.slice(0, 160) }, "[gemini] fail");
         if (!/429|quota|exhausted|rate/i.test(msg)) break; // sirf rate-limit pe retry
         await sleep(10000);
       }

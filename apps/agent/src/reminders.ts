@@ -1,9 +1,10 @@
+import logger from "./logger.js";
 import { sbAdmin } from "./sb.js";
 
 // Reminder save — intent brain samajhta hai, ye sirf DB me dalta hai (per user).
 export async function saveReminder(userId: string, title: string, remindAt: Date, source = "custom") {
   if (!sbAdmin) {
-    console.log(`[reminder] (no DB) ${title} @ ${remindAt.toISOString()}`);
+    logger.info({ title, at: remindAt.toISOString() }, "[reminder] (no DB) saved locally");
     return { id: "local", title, remindAt };
   }
   const { data, error } = await sbAdmin

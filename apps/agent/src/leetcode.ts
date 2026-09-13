@@ -1,5 +1,6 @@
 // LeetCode upcoming contests — free, no key.
 // Primary: LeetCode official GraphQL. Fallback: kontests.net.
+import logger from "./logger.js";
 
 export type Contest = { name: string; startAt: Date; url: string };
 
@@ -48,12 +49,12 @@ export async function nextLeetCodeContest(): Promise<Contest | null> {
   try {
     return await fromLeetCodeOfficial();
   } catch (e) {
-    console.error("[leetcode] official failed, trying kontests:", (e as Error).message);
+    logger.error({ err: e }, "[leetcode] official failed, trying kontests");
   }
   try {
     return await fromKontests();
   } catch (e) {
-    console.error("[leetcode] fetch failed:", (e as Error).message);
+    logger.error({ err: e }, "[leetcode] fetch failed");
     return null;
   }
 }

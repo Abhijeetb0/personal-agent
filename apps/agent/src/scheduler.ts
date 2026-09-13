@@ -1,4 +1,5 @@
 import cron from "node-cron";
+import logger from "./logger.js";
 import { sbAdmin } from "./sb.js";
 import { sendWhatsAppMessage, allSessions } from "./baileys.js";
 import { getOwnerNumber } from "./store.js";
@@ -7,7 +8,7 @@ import { getOwnerNumber } from "./store.js";
 // Render Free sleep me miss ho sakta hai (cron-job.org ping lagao).
 export function startScheduler() {
   if (!sbAdmin) {
-    console.log("[cron] DB nahi hai — scheduler off (sirf chat chalega)");
+    logger.info("[cron] DB nahi hai — scheduler off (sirf chat chalega)");
     return;
   }
   cron.schedule("* * * * *", async () => {
@@ -24,13 +25,13 @@ export function startScheduler() {
       for (const r of due) {
         const s = live.get(r.user_id);
         if (!s) {
-          console.log(`[cron] skip ${r.id}: user session connected nahi`);
+          logger.info({ id: r.id }, "[cron] skip: user session connected nahi");
           continue;
         }
         // owner boot ke baad set hua ho to fresh uthao
         const owner = s.ownerNumber || (await getOwnerNumber(r.user_id));
         if (!owner) {
-          console.log(`[cron] skip ${r.id}: owner number set nahi`);
+          logger.info({ id: r.id }, "[cron] skip: owner number set nahi");
           continue;
         }
         if (!s.ownerNumber) s.ownerNumber = owner;
@@ -39,18 +40,18 @@ export function startScheduler() {
           // Crash ke beech me phasne se miss ho sakta hai, par double-reminder nahi jayega.
           await sbAdmin!.from("Reminder").update({ sent: true }).eq("id", r.id);
           await sendWhatsAppMessage(r.user_id, `${owner}@s.whatsapp.net`, `⏰ Reminder: ${r.title}`);
-          console.log(`[cron] reminder bheja (${r.user_id.slice(0, 8)}): ${r.title}`);
+          logger.info({ userId: r.user_id.slice(0, 8), title: r.title }, "[cron] reminder bheja");
         } catch (e) {
-          console.error("[cron] send fail, retry ke liye wapas:", (e as Error).message);
+          logger.error({ err: e }, "[cron] send fail, retry ke liye wapas");
           await sbAdmin!.from("Reminder").update({ sent: false }).eq("id", r.id).then(
             () => {},
-            (e2) => console.error("[cron] unclaim fail:", (e2 as Error).message)
+            (e2) => logger.error({ err: e2 }, "[cron] unclaim fail")
           );
         }
       }
-    } catch (e) {
-      console.error("[cron] tick fail:", (e as Error).message);
-    }
+  } catch (e) {
+    logger.error({ err: e }, "[cron] tick fail");
+  }
   });
-  console.log("[cron] scheduler on (har minute check)");
+  logger.info("[cron] scheduler on (har minute check)");
 }

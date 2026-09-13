@@ -1,3 +1,4 @@
+import logger from "./logger.js";
 import { llmChat, type ChatMsg } from "./llm.js";
 import {
   allLeetCodeContests, pastContests, upcomingContests, contestQuestions, formatIST,
@@ -56,7 +57,7 @@ const KNOWN_TOOLS = new Set([
 
 // Model kayi format me tool mangta hai — sab samjho:
 // {"action":"tool","name":..}, {"action":"remember",...}, {"tool":..}, {"function":..}
-function parseAction(raw: string): BrainAction | null {
+export function parseAction(raw: string): BrainAction | null {
   const clean = raw.replace(/```json|```/g, "").trim();
   const s = clean.indexOf("{");
   const e = clean.lastIndexOf("}");
@@ -229,10 +230,9 @@ export async function brainReply(userText: string, history: string[] = [], userI
       const t = cleanText(raw);
       if (t && !looksLikeProtocol(t)) {
         if (t.trim().startsWith("{")) {
-          // kata-phata protocol JSON — text bacha lo, dobara plain mango
           const salvaged = salvageProtocolText(raw);
           if (salvaged) {
-            console.log("[brain] kata JSON salvage kiya");
+            logger.info("[brain] kata JSON salvage kiya");
             pendingReply = salvaged;
             break;
           }
@@ -253,7 +253,7 @@ export async function brainReply(userText: string, history: string[] = [], userI
     if (act.action === "reply") {
       // Kachcha JSON user ko kabhi mat bhejo — dobara plain text mango
       if (looksLikeProtocol(act.text)) {
-        console.log("[brain] JSON leak pakda, plain text dobara mang rahe...");
+        logger.info("[brain] JSON leak pakda, plain text dobara mang rahe...");
         msgs.push({ role: "assistant", content: JSON.stringify(act) });
         msgs.push({ role: "user", content: "Galat format! User ko JSON nahi, seedha Hinglish jawab do (reply action me, sirf text)." });
         continue;
@@ -261,7 +261,7 @@ export async function brainReply(userText: string, history: string[] = [], userI
       pendingReply = act.text;
       const missing = required.filter((r) => !used.includes(r));
       if (missing.length > 0) {
-        console.log(`[brain] verifier: ${missing.join(",")} tool missing, dobara mang rahe...`);
+        logger.info({ tools: missing }, "[brain] verifier: tool missing, dobara mang rahe...");
         pendingReply = null;
         msgs.push({ role: "assistant", content: JSON.stringify(act) });
         msgs.push({
@@ -273,7 +273,7 @@ export async function brainReply(userText: string, history: string[] = [], userI
       return act.text;
     }
     used.push(act.name);
-    console.log(`[brain] tool: ${act.name} ${JSON.stringify(act.args).slice(0, 120)}`);
+    logger.info({ tool: act.name, args: JSON.stringify(act.args).slice(0, 120) }, "[brain] tool call");
     const result = await runTool(userId, act.name, act.args);
     msgs.push({ role: "assistant", content: JSON.stringify({ action: "tool", name: act.name, args: act.args }) });
     msgs.push({ role: "user", content: `<untrusted_tool_result name="${act.name}">\n${result}\n</untrusted_tool_result>\n\nAb user ko final jawab do (JSON reply action me).` });

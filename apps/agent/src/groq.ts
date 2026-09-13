@@ -1,5 +1,6 @@
 // Groq OpenAI-compatible API — free tier limits generous hain
 // Multi-model rotation: alag-alag model = alag RPM pool, isliye 429 pe agle model pe turant failover.
+import logger from "./logger.js";
 
 export type ChatMsg = { role: "system" | "user" | "assistant"; content: string };
 
@@ -50,9 +51,9 @@ export async function logAvailableModels(): Promise<void> {
     if (!r.ok) throw new Error(`models ${r.status}`);
     const j = (await r.json()) as any;
     const ids = (j?.data ?? []).map((m: any) => m.id).filter(Boolean).sort();
-    console.log(`[groq] live models (${ids.length}): ${ids.join(", ")}`);
+    logger.info({ count: ids.length, models: ids.join(", ") }, "[groq] live models");
   } catch (e) {
-    console.error("[groq] live model list nahi mili:", (e as Error).message.slice(0, 100));
+    logger.error({ err: e }, "[groq] live model list nahi mili");
   }
 }
 
@@ -80,13 +81,12 @@ async function callOneModel(key: string, model: string, messages: ChatMsg[], max
   const rawContent = String(j?.choices?.[0]?.message?.content ?? "");
   const rawReasoning = String(j?.choices?.[0]?.message?.reasoning ?? "");
   let text = cleanText(rawContent);
-  if (!text && rawReasoning) {
-    const thought = cleanText(rawReasoning).slice(0, 1500);
-    // reasoning me jawab nahi, internal monologue hota hai — user ko bhejoge to "The user asks..." jaisa kachra jayega
-    if (looksLikeThinking(thought)) throw new Error(`groq empty content, thinking-only [${model}]`);
-    console.log(`[groq] content empty [${model}], reasoning se uthaya`);
-    text = thought;
-  }
+    if (!text && rawReasoning) {
+      const thought = cleanText(rawReasoning).slice(0, 1500);
+      if (looksLikeThinking(thought)) throw new Error(`groq empty content, thinking-only [${model}]`);
+      logger.info({ model }, "[groq] content empty, reasoning se uthaya");
+      text = thought;
+    }
   if (!text) throw new Error(`groq empty reply [${model}]`);
   return text;
 }
@@ -108,7 +108,7 @@ export async function groqChat(messages: ChatMsg[], maxTokens = 400): Promise<st
   for (const model of ordered) {
     const coolUntil = cooldowns.get(model) ?? 0;
     if (coolUntil > now) {
-      console.log(`[groq] skip [${model}] (cooldown ${Math.ceil((coolUntil - now) / 1000)}s)`);
+      logger.info({ model, cooldownSec: Math.ceil((coolUntil - now) / 1000) }, "[groq] skip (cooldown)");
       continue;
     }
     try {
@@ -116,31 +116,28 @@ export async function groqChat(messages: ChatMsg[], maxTokens = 400): Promise<st
     } catch (e) {
       lastErr = e;
       const msg = (e as Error).message || "";
-      console.error(`[groq] fail [${model}]:`, msg.slice(0, 120));
+      logger.error({ model, err: msg.slice(0, 120) }, "[groq] fail");
       if (isDeadModelMsg(msg)) {
-        // mara hua model: retry bekar, 1h cooldown + turant agla model
-        console.error(`[groq] dead model [${model}], 1h skip`);
+        logger.error({ model }, "[groq] dead model, 1h skip");
         cooldowns.set(model, Date.now() + DEAD_MODEL_COOLDOWN_MS);
         continue;
       }
       if (isRateLimitMsg(msg)) {
-        // rate-limit pe BINA RUKE agle model pe jao, is model ko cooldown me dalo
         cooldowns.set(model, Date.now() + COOLDOWN_MS);
         continue;
       }
-      // network/5xx/empty pe ek chhota retry isi model pe, phir agla model
       await new Promise((r) => setTimeout(r, 2000));
       try {
         return await callOneModel(key, model, messages, maxTokens);
       } catch (e2) {
         lastErr = e2;
-        console.error(`[groq] retry fail [${model}]:`, (e2 as Error).message.slice(0, 120));
+        logger.error({ model, err: (e2 as Error).message.slice(0, 120) }, "[groq] retry fail");
       }
     }
   }
   // sab cooldown me the ya fail ho gaye to pehle model pe ek aakhri mauka (cooldown ignore)
   if (lastErr && ordered.every((m) => (cooldowns.get(m) ?? 0) > Date.now())) {
-    console.log("[groq] sab models cooldown me, pehle model pe last try...");
+    logger.info("[groq] sab models cooldown me, pehle model pe last try...");
     cooldowns.clear();
     try {
       return await callOneModel(key, models[0], messages, maxTokens);
@@ -172,7 +169,7 @@ export async function getGroqReply(userText: string, history: string[] = []): Pr
   try {
     return await groqChat(messages);
   } catch (e) {
-    console.error(`[groq] fail:`, (e as Error).message.slice(0, 160));
+    logger.error({ err: (e as Error).message.slice(0, 160) }, "[groq] getGroqReply fail");
     throw e;
   }
 }

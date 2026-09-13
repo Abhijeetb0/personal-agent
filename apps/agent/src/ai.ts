@@ -1,3 +1,4 @@
+import logger from "./logger.js";
 import { brainReply } from "./brain.js";
 import { getGroqReply } from "./groq.js";
 import { getReply as getGeminiReply } from "./gemini.js";
@@ -8,15 +9,14 @@ export async function getAiReply(userText: string, history: string[] = [], userI
     return await brainReply(userText, history, userId);
   } catch (e) {
     const msg = (e as Error).message || "";
-    console.error("[ai] brain failed, plain fallback:", msg.slice(0, 120));
-    // rate-limit? thoda ruk ke brain ko ek aur mauka (aksar kaam karta hai)
+    logger.error({ err: msg.slice(0, 120) }, "[ai] brain failed, plain fallback");
     if (/429|rate|limit|empty reply/i.test(msg)) {
-      console.log("[ai] 12s cooldown, retry...");
+      logger.info("[ai] 12s cooldown, retry...");
       await new Promise((r) => setTimeout(r, 12000));
       try {
         return await brainReply(userText, history, userId);
       } catch (e2) {
-        console.error("[ai] retry failed:", (e2 as Error).message.slice(0, 120));
+        logger.error({ err: (e2 as Error).message.slice(0, 120) }, "[ai] retry failed");
       }
     }
   }

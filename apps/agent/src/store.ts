@@ -1,3 +1,4 @@
+import logger from "./logger.js";
 import { sbAdmin } from "./sb.js";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -23,7 +24,7 @@ export async function saveAuthToSupabase(userId: string, authDir: string, status
       qr: qr ?? null,
     });
   } catch (e) {
-    console.error("[store] supabase save failed:", (e as Error).message);
+    logger.error({ err: e }, "[store] supabase save failed");
   }
 }
 
@@ -36,12 +37,12 @@ export async function restoreAuthFromSupabase(userId: string, authDir: string) {
     await fs.mkdir(authDir, { recursive: true });
     for (const [f, content] of Object.entries(blob)) {
       await fs.writeFile(path.join(authDir, f), content, "utf-8").catch((e) =>
-        console.error(`[store] restore write fail ${f}:`, (e as Error).message)
+        logger.error({ file: f, err: e }, "[store] restore write fail")
       );
     }
-    console.log(`[store] session Supabase se restore ho gaya (${userId.slice(0, 8)})`);
+    logger.info({ userId: userId.slice(0, 8) }, "[store] session Supabase se restore ho gaya");
   } catch (e) {
-    console.log("[store] no previous session:", (e as Error).message);
+    logger.info({ err: (e as Error).message }, "[store] no previous session");
   }
 }
 
@@ -50,7 +51,7 @@ export async function setStatus(userId: string, status: string, qr?: string) {
   try {
     await sbAdmin.from("WaSession").upsert({ user_id: userId, status, qr: qr ?? null });
   } catch (e) {
-    console.error("[store] setStatus fail:", (e as Error).message);
+    logger.error({ err: e }, "[store] setStatus fail");
   }
 }
 
@@ -59,7 +60,7 @@ export async function clearSupabaseSession(userId: string) {
   try {
     await sbAdmin.from("WaSession").upsert({ user_id: userId, auth_blob: {}, status: "disconnected", qr: null });
   } catch (e) {
-    console.error("[store] clear session fail:", (e as Error).message);
+    logger.error({ err: e }, "[store] clear session fail");
   }
 }
 
@@ -69,7 +70,7 @@ export async function listSessionUsers(): Promise<string[]> {
     const { data } = await sbAdmin.from("WaSession").select("user_id");
     return ((data as any[]) || []).map((r) => r.user_id);
   } catch (e) {
-    console.error("[store] list users fail:", (e as Error).message);
+    logger.error({ err: e }, "[store] list users fail");
     return [];
   }
 }
@@ -82,7 +83,7 @@ export async function getOwnerNumber(userId: string): Promise<string> {
       const n = (data as any)?.owner_number as string | undefined;
       if (n) return n.replace(/[^0-9]/g, "");
     } catch (e) {
-      console.error("[store] getOwner fail:", (e as Error).message);
+      logger.error({ err: e }, "[store] getOwner fail");
     }
   }
   return (process.env.OWNER_NUMBER || "").replace(/[^0-9]/g, "");

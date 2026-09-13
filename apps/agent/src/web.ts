@@ -1,5 +1,6 @@
 // No-key web search (DuckDuckGo) + page fetch.
 // AI khud fetch karke jawab de — har sawal ke liye alag tool nahi.
+import logger from "./logger.js";
 
 export type SearchHit = { title: string; snippet: string; url: string };
 
@@ -65,7 +66,7 @@ export async function ddgSearch(query: string, max = 4): Promise<SearchHit[]> {
       }
       if (hits.length > 0) return hits.slice(0, max);
     } catch (e) {
-      console.error("[web] search fail:", (e as Error).message);
+      logger.error({ err: e }, "[web] search fail");
     }
   }
   return [];

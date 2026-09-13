@@ -8,6 +8,7 @@ import {
 import { setOwnerNumber, getOwnerNumber } from "./store.js";
 import { normalize } from "./whitelist.js";
 import { nextLeetCodeContest, formatIST } from "./leetcode.js";
+import { generalLimiter, sensitiveLimiter, sendLimiter } from "./rateLimit.js";
 
 declare global {
   namespace Express {
@@ -21,6 +22,7 @@ export function buildRoutes() {
   const app = express();
   app.use(cors());
   app.use(express.json());
+  app.use(generalLimiter);
 
   app.get("/health", (_req, res) => res.json({ ok: true }));
 
@@ -63,7 +65,7 @@ export function buildRoutes() {
 
   // manual test: owner ko message bhejo (dashboard se test button)
   // recipient lock: sirf apne owner number pe bhej sakte ho (spam/abuse rokne ke liye)
-  app.post("/send", auth, async (req, res) => {
+  app.post("/send", auth, sendLimiter, async (req, res) => {
     try {
       const uid = needUser(req);
       const { to, text } = req.body as { to: string; text: string };
@@ -82,7 +84,7 @@ export function buildRoutes() {
   });
 
   // Dashboard: "Naya QR" — aadha-fasa session saaf karke fresh pairing shuru karo
-  app.post("/reset", auth, async (req, res) => {
+  app.post("/reset", auth, sensitiveLimiter, async (req, res) => {
     try {
       await resetSession(needUser(req));
       res.json({ ok: true });
@@ -92,7 +94,7 @@ export function buildRoutes() {
   });
 
   // Pairing code: QR ki jagah phone me 8-digit code type karo. Body: { number }
-  app.post("/pairing-code", auth, async (req, res) => {
+  app.post("/pairing-code", auth, sensitiveLimiter, async (req, res) => {
     try {
       const num = String((req.body as any)?.number || "");
       const out = await requestPairingCode(needUser(req), num);

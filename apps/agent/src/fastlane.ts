@@ -1,3 +1,4 @@
+import logger from "./logger.js";
 import {
   allLeetCodeContests, pastContests, upcomingContests, contestQuestions, formatIST,
 } from "./leetcode.js";
@@ -54,7 +55,7 @@ export async function tryFastLane(text: string): Promise<string | null> {
     if (!c) return null;
     return `Next LeetCode contest: ${c.name}\n${formatIST(c.startAt)} (IST) ko hai.\nChaho to bolo "is se 30 min pehle remind kar" — yaad dila dunga!`;
   } catch (e) {
-    console.error("[fastlane] fail:", (e as Error).message);
+    logger.error({ err: e }, "[fastlane] fail");
     return null;
   }
 }

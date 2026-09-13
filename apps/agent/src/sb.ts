@@ -1,12 +1,13 @@
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
+import logger from "./logger.js";
 dotenv.config();
 
 const url = process.env.SUPABASE_URL || "";
 const secret = process.env.SUPABASE_SECRET_KEY || "";
 const pub = process.env.SUPABASE_PUBLISHABLE_KEY || "";
 
-if (!url) console.warn("[sb] SUPABASE_URL missing — DB features off rahenge");
+if (!url) logger.warn("[sb] SUPABASE_URL missing — DB features off rahenge");
 
 // Admin client (service_role): RLS bypass, sirf backend me
 export const sbAdmin = url && secret ? createClient(url, secret) : null;

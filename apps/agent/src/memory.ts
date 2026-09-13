@@ -1,3 +1,4 @@
+import logger from "./logger.js";
 import { sbAdmin } from "./sb.js";
 
 // Long-term memory — bina embedding/vector ke (zero token cost):
@@ -54,7 +55,7 @@ export async function recallMemories(userId: string, text: string, limit = 5): P
     const { data } = await sbAdmin.from("Memory").select("fact").eq("user_id", userId).or(ors).order("created_at", { ascending: false }).limit(limit);
     return ((data as any[]) || []).map((r) => r.fact);
   } catch (e) {
-    console.error("[memory] recall fail:", (e as Error).message);
+    logger.error({ err: e }, "[memory] recall fail");
     return [];
   }
 }

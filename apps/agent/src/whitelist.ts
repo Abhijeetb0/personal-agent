@@ -2,6 +2,7 @@
 // v7 me sender aksar @lid me aata hai — PN match na ho to LID mapping se verify karo.
 import type { WASocket } from "@whiskeysockets/baileys";
 import { isLidUser } from "@whiskeysockets/baileys";
+import logger from "./logger.js";
 
 export function normalize(num: string): string {
   // ":0" jaise device suffix aur "@lid"/"@s.whatsapp.net" हटाओ, sirf digits rakho
@@ -29,18 +30,18 @@ export async function isOwner(sock: WASocket | null, from: string, rawJid?: stri
     try {
       const ownerPn = `${o}@s.whatsapp.net`;
       const ownerLid = await withTimeout(sock.signalRepository.lidMapping.getLIDForPN(ownerPn));
-      console.log(`[lid-debug] ownerPn=${ownerPn} ownerLid=${ownerLid} sender=${rawJid}`);
+      logger.info({ ownerPn, ownerLid, sender: rawJid }, "[lid-debug]");
       if (ownerLid && normalize(ownerLid) === f) {
-        console.log(`[guard] owner LID match: ${rawJid}`);
+        logger.info({ rawJid }, "[guard] owner LID match");
         return true;
       }
       const pn = await withTimeout(sock.signalRepository.lidMapping.getPNForLID(rawJid));
       if (pn && normalize(pn) === o) {
-        console.log(`[guard] owner PN match via LID: ${rawJid} -> ${pn}`);
+        logger.info({ rawJid, pn }, "[guard] owner PN match via LID");
         return true;
       }
     } catch (e) {
-      console.error("[guard] lid check fail:", (e as Error).message);
+      logger.error({ err: e }, "[guard] lid check fail");
     }
   }
   return false;
