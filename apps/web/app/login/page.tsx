@@ -7,21 +7,42 @@ export default function Login() {
   const [pw, setPw] = useState("");
   const [mode, setMode] = useState<"in" | "up">("in");
   const [err, setErr] = useState("");
+  const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr("");
+    setInfo("");
     setLoading(true);
     try {
       const sb = supabaseBrowser();
-      const r = mode === "in"
-        ? await sb.auth.signInWithPassword({ email, password: pw })
-        : await sb.auth.signUp({ email, password: pw });
-      if (r.error) throw r.error;
-      window.location.href = "/dashboard";
+      if (mode === "in") {
+        const r = await sb.auth.signInWithPassword({ email, password: pw });
+        if (r.error) throw r.error;
+        window.location.href = "/dashboard";
+      } else {
+        const r = await sb.auth.signUp({ email, password: pw });
+        if (r.error) throw r.error;
+        if (r.data.session) {
+          // email-confirm OFF hai → turant login
+          window.location.href = "/dashboard";
+        } else {
+          // email-confirm ON hai → user ko saaf batao
+          setInfo("Signup ho gaya! ✅ Email me confirm link bheja hai — pehle use kholo, fir Login karo. (Ya admin se email-confirm OFF karwao.)");
+          setMode("in");
+        }
+      }
     } catch (e: any) {
-      setErr(e.message || "Login fail");
+      const m = String(e.message || "Fail");
+      if (/email not confirmed/i.test(m)) {
+        setErr("Email confirm nahi hui. Pehle email ka link kholo, ya Supabase me Confirm email OFF karo (README Step 1).");
+      } else if (/already registered|already exists/i.test(m)) {
+        setErr("Ye email pehle se registered hai — Login karo.");
+        setMode("in");
+      } else {
+        setErr(m);
+      }
     }
     setLoading(false);
   }
@@ -39,6 +60,7 @@ export default function Login() {
           <button disabled={loading} style={{ width: "100%" }}>{loading ? "Ruko..." : mode === "in" ? "Login" : "Signup"}</button>
         </form>
         {err && <p className="err">{err}</p>}
+        {info && <p className="ok-text">{info}</p>}
         <p className="muted" style={{ marginTop: 12 }}>
           {mode === "in" ? "Account nahi hai? " : "Account hai? "}
           <a href="#" onClick={(e) => { e.preventDefault(); setMode(mode === "in" ? "up" : "in"); }}>
