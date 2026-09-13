@@ -6,6 +6,7 @@ import { logMessage, recentHistory } from "./db.js";
 import { tryFastLane } from "./fastlane.js";
 import { ddgSearch, looksFactual } from "./web.js";
 import { getSession } from "./baileys.js";
+import { salvageProtocolText } from "./brain.js";
 
 export async function handleIncomingMessage(sock: WASocket, m: WAMessage, userId: string) {
   const text = extractText(m);
@@ -39,16 +40,22 @@ export async function handleIncomingMessage(sock: WASocket, m: WAMessage, userId
   try {
     console.log(`[msg] brain soch raha...`);
     const history = await recentHistory(userId, from);
-    const reply = await getAiReply(text, history, userId);
+    let reply = await getAiReply(text, history, userId);
+    // Aakhri safety net: kachcha protocol JSON user ko KABHI nahi
+    if (reply.trim().startsWith("{")) {
+      console.error("[guard] protocol leak pakda, salvage kar rahe...");
+      reply = salvageProtocolText(reply) ?? "Lamba jawab adhoora kat gaya — thoda chhota karke mango (jaise 500 words me).";
+    }
     console.log(`[msg] reply ready (${reply.length} chars), bhej rahe...`);
     await sock.sendMessage(m.key.remoteJid!, { text: reply });
     await logMessage(userId, from, text, reply, true);
   } catch (e) {
     console.error("[ai] fail:", (e as Error).message);
-    // AI down? factual sawal ho to search snippets hi bhej do — khaali haath nahi
+    // AI down? factual sawal ho to search snippets hi bhej do — khaali haath nahi.
+    // Creative kaam (likho/banao/essay) me search snippets kachra lagte hain ("Viral girl" jaisa), waha seedha issue bolo.
     let fallback = "Abhi thoda issue hai, 1 min me fir bolo. (AI key/limit check karo)";
     try {
-      if (looksFactual(text)) {
+      if (looksFactual(text) && !/likh|bnao|essay|story|kahani|translate|hinglish|architecture|roadmap/i.test(text)) {
         const hits = await ddgSearch(text, 3);
         if (hits.length > 0) {
           fallback = "AI busy hai, par ye mila:\n" + hits.map((h, i) => `${i + 1}. ${h.title} — ${h.snippet.slice(0, 130)}`).join("\n");

@@ -85,6 +85,26 @@ export function looksLikeProtocol(text: string): boolean {
   return /^\{[\s\S]*\}$/.test(t) && /"(action|tool|function)"/.test(t);
 }
 
+// Token budget me kata-phata protocol JSON — usme se "text" nikalo.
+// (Lambe jawab max_tokens me kat jate hain; kachcha JSON user ko bhejne se achha hai text bacha lo.)
+export function salvageProtocolText(raw: string): string | null {
+  const m = raw.match(/"text"\s*:\s*"([\s\S]*)$/);
+  if (!m) return null;
+  let t = m[1];
+  t = t.replace(/\\u[0-9a-fA-F]{0,3}$/, "").replace(/\\$/, ""); // adhoora escape kato
+  t = t.replace(/"\s*\}?\s*$/, ""); // poora JSON ho to wrapper hatao
+  try {
+    t = JSON.parse(`"${t}"`);
+  } catch {
+    /* escape adhoora hai to raw text hi sahi */
+  }
+  t = String(t).trim();
+  return t.length ? t : null;
+}
+
+// Lambe content wale sawal (essay/story/detail) — inhe chhota 500-token budget kat deta hai
+const LONG_FORM = /(essay|nibandh|story|kahani|kavita|poem|shayari|article|speech|letter|words?|shabd|bada|detail|vistaar|architecture|roadmap|explain|samjha|likh|bnao|translate|hinglish me (kar|do)|poora|pura)/i;
+
 function fmtContestList(name: string, startAt: Date, qs: { title: string }[]): string {
   const lines = qs.map((q, i) => `${i + 1}. ${q.title}`).join("\n");
   return `${name} (${formatIST(startAt)} IST)\nProblems:\n${lines}`;
@@ -199,13 +219,26 @@ export async function brainReply(userText: string, history: string[] = [], userI
   const required = needs(userText);
   const used: string[] = [];
   let pendingReply: string | null = null;
+  const budget = LONG_FORM.test(userText) ? 3000 : 500;
   for (let round = 0; round < 4; round++) {
-    const raw = await groqChat(msgs, 500);
+    const raw = await groqChat(msgs, budget);
     const act = parseAction(raw);
     if (!act) {
       const { cleanText } = await import("./groq.js");
       const t = cleanText(raw);
       if (t && !looksLikeProtocol(t)) {
+        if (t.trim().startsWith("{")) {
+          // kata-phata protocol JSON — text bacha lo, dobara plain mango
+          const salvaged = salvageProtocolText(raw);
+          if (salvaged) {
+            console.log("[brain] kata JSON salvage kiya");
+            pendingReply = salvaged;
+            break;
+          }
+          msgs.push({ role: "assistant", content: raw.slice(0, 500) });
+          msgs.push({ role: "user", content: "Adhoora JSON gaya! User ko seedha Hinglish jawab do, JSON bilkul nahi." });
+          continue;
+        }
         pendingReply = t;
         break;
       }

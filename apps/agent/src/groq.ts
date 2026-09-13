@@ -56,6 +56,15 @@ export async function logAvailableModels(): Promise<void> {
   }
 }
 
+// Model ki internal soch user ko kabhi nahi — ye agle model pe failover karega
+function looksLikeThinking(t: string): boolean {
+  const s = t.trim();
+  return (
+    /^(the user|user asks|we need|we must|i('ll| will| need| should)|let me|first,?\s+i |okay,? (so|the user)|to answer this|reasoning:|<think>)/i.test(s) ||
+    /<think>/i.test(s)
+  );
+}
+
 async function callOneModel(key: string, model: string, messages: ChatMsg[], maxTokens: number): Promise<string> {
   const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
@@ -72,8 +81,11 @@ async function callOneModel(key: string, model: string, messages: ChatMsg[], max
   const rawReasoning = String(j?.choices?.[0]?.message?.reasoning ?? "");
   let text = cleanText(rawContent);
   if (!text && rawReasoning) {
+    const thought = cleanText(rawReasoning).slice(0, 1500);
+    // reasoning me jawab nahi, internal monologue hota hai — user ko bhejoge to "The user asks..." jaisa kachra jayega
+    if (looksLikeThinking(thought)) throw new Error(`groq empty content, thinking-only [${model}]`);
     console.log(`[groq] content empty [${model}], reasoning se uthaya`);
-    text = cleanText(rawReasoning).slice(0, 1500);
+    text = thought;
   }
   if (!text) throw new Error(`groq empty reply [${model}]`);
   return text;
