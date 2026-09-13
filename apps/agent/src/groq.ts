@@ -1,4 +1,5 @@
 // Groq OpenAI-compatible API — free tier limits generous hain
+// Multi-model rotation: alag-alag model = alag RPM pool, isliye 429 pe agle model pe turant failover.
 
 export type ChatMsg = { role: "system" | "user" | "assistant"; content: string };
 
@@ -6,37 +7,98 @@ export function cleanText(t: string): string {
   return t.replace(/<think>[\s\S]*?(<\/think>|$)/g, "").trim();
 }
 
+// Env: GROQ_MODELS="m1,m2,m3" (priority order). Purana GROQ_MODEL bhi chalega. Default list built-in.
+function modelList(): string[] {
+  const raw = process.env.GROQ_MODELS || process.env.GROQ_MODEL || "";
+  const list = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const defaults = ["groq/compound-mini", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
+  const merged = list.length ? list : defaults;
+  return [...new Set(merged)];
+}
+
+// 429/rate-limit wala model thodi der ke liye skip (cooldown), taaki har call pe dead model pe time waste na ho
+const cooldowns = new Map<string, number>();
+const COOLDOWN_MS = 60_000;
+
+function isRateLimitMsg(msg: string): boolean {
+  return /429|rate.?limit|rate_limit|quota|too many requests/i.test(msg);
+}
+
+async function callOneModel(key: string, model: string, messages: ChatMsg[], maxTokens: number): Promise<string> {
+  const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0.7 }),
+    signal: AbortSignal.timeout(45000),
+  } as any);
+  if (!r.ok) {
+    const t = await r.text().catch(() => "");
+    throw new Error(`groq ${r.status} [${model}]: ${t.slice(0, 160)}`);
+  }
+  const j = (await r.json()) as any;
+  const rawContent = String(j?.choices?.[0]?.message?.content ?? "");
+  const rawReasoning = String(j?.choices?.[0]?.message?.reasoning ?? "");
+  let text = cleanText(rawContent);
+  if (!text && rawReasoning) {
+    console.log(`[groq] content empty [${model}], reasoning se uthaya`);
+    text = cleanText(rawReasoning).slice(0, 1500);
+  }
+  if (!text) throw new Error(`groq empty reply [${model}]`);
+  return text;
+}
+
 export async function groqChat(messages: ChatMsg[], maxTokens = 400): Promise<string> {
   const key = process.env.GROQ_API_KEY || "";
   if (!key) throw new Error("GROQ_API_KEY missing");
-  const model = process.env.GROQ_MODEL || "groq/compound-mini";
+  const models = modelList();
+  const now = Date.now();
+  // priority order rakho, bas cooldown wale models ko peeche karo
+  const ordered = [...models].sort((a, b) => {
+    const ca = cooldowns.get(a) ?? 0;
+    const cb = cooldowns.get(b) ?? 0;
+    const aCool = ca > now ? 1 : 0;
+    const bCool = cb > now ? 1 : 0;
+    return aCool - bCool;
+  });
   let lastErr: unknown = null;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (const model of ordered) {
+    const coolUntil = cooldowns.get(model) ?? 0;
+    if (coolUntil > now) {
+      console.log(`[groq] skip [${model}] (cooldown ${Math.ceil((coolUntil - now) / 1000)}s)`);
+      continue;
+    }
     try {
-      const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0.7 }),
-        signal: AbortSignal.timeout(45000),
-      } as any);
-      if (!r.ok) {
-        const t = await r.text().catch(() => "");
-        throw new Error(`groq ${r.status}: ${t.slice(0, 160)}`);
-      }
-      const j = (await r.json()) as any;
-      const rawContent = String(j?.choices?.[0]?.message?.content ?? "");
-      const rawReasoning = String(j?.choices?.[0]?.message?.reasoning ?? "");
-      let text = cleanText(rawContent);
-      if (!text && rawReasoning) {
-        console.log("[groq] content empty, reasoning se uthaya");
-        text = cleanText(rawReasoning).slice(0, 1500);
-      }
-      if (!text) throw new Error("groq empty reply");
-      return text;
+      return await callOneModel(key, model, messages, maxTokens);
     } catch (e) {
       lastErr = e;
-      console.error(`[groq] fail (attempt ${attempt + 1}):`, (e as Error).message.slice(0, 120));
-      await new Promise((r) => setTimeout(r, 3000));
+      const msg = (e as Error).message || "";
+      console.error(`[groq] fail [${model}]:`, msg.slice(0, 120));
+      if (isRateLimitMsg(msg)) {
+        // rate-limit pe BINA RUKE agle model pe jao, is model ko cooldown me dalo
+        cooldowns.set(model, Date.now() + COOLDOWN_MS);
+        continue;
+      }
+      // network/5xx/empty pe ek chhota retry isi model pe, phir agla model
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        return await callOneModel(key, model, messages, maxTokens);
+      } catch (e2) {
+        lastErr = e2;
+        console.error(`[groq] retry fail [${model}]:`, (e2 as Error).message.slice(0, 120));
+      }
+    }
+  }
+  // sab cooldown me the ya fail ho gaye to pehle model pe ek aakhri mauka (cooldown ignore)
+  if (lastErr && ordered.every((m) => (cooldowns.get(m) ?? 0) > Date.now())) {
+    console.log("[groq] sab models cooldown me, pehle model pe last try...");
+    cooldowns.clear();
+    try {
+      return await callOneModel(key, models[0], messages, maxTokens);
+    } catch (e) {
+      lastErr = e;
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error("groq failed");
