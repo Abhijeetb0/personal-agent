@@ -27,9 +27,12 @@ Tumhare paas ye TOOLS hain. Har jawab SIRF JSON me do, aur kuch nahi:
 4. wiki — args: {"topic":"..."} — kisi cheez ki definition/background
 5. web_search — args: {"query":"..."} — fresh/info sawal (news, rate, score, capital, facts)
 6. news — args: {} — aaj ki top headlines
-7. remember — args: {"fact":"..."} — user ki pakki baat long-term yaad rakho (naam, pasand, team, goals; "yaad rakhna" bole to LAZMI)
+7. remember — args: {"fact":"..."} — user ki pakki baat long-term yaad rakho (naam, pasand, team, goals; "yaad rakhna" bole to LAZMI; user khud se naam/pasand bataye to BINA KAHE bhi save karo)
 8. forget — args: {"keyword":"..."} — "bhool jao" bole to matching yaad mitao
 9. list_reminders — args: {} — pending reminders ki list ("mere reminders dikhao" pe LAZMI, andaza mat lagao)
+
+MEMORY SACH (jhoothi yaad sabse badi galti):
+- "Mere baare me kya jaante ho" pe SIRF upar di hui PAKKI BAATEIN + recent chat batao. Kuch yaad na ho to saaf kaho "abhi kuch khaas yaad nahi" — khud se facts MAT gado.
 
 Rules:
 - Tool result milne ke baad use padh ke user ko Hinglish me jawab do (JSON nahi, seedha text reply action me).
@@ -45,6 +48,13 @@ type BrainAction =
   | { action: "reply"; text: string }
   | { action: "tool"; name: string; args: Record<string, any> };
 
+const KNOWN_TOOLS = new Set([
+  "contest", "remind", "time_now", "wiki", "web_search", "news",
+  "remember", "forget", "list_reminders",
+]);
+
+// Model kayi format me tool mangta hai — sab samjho:
+// {"action":"tool","name":..}, {"action":"remember",...}, {"tool":..}, {"function":..}
 function parseAction(raw: string): BrainAction | null {
   const clean = raw.replace(/```json|```/g, "").trim();
   const s = clean.indexOf("{");
@@ -52,10 +62,27 @@ function parseAction(raw: string): BrainAction | null {
   if (s === -1 || e <= s) return null;
   try {
     const o = JSON.parse(clean.slice(s, e + 1));
-    if (o.action === "reply" && typeof o.text === "string") return o;
-    if (o.action === "tool" && typeof o.name === "string") return { action: "tool", name: o.name, args: o.args || {} };
+    if (typeof o.text === "string" && (o.action === "reply" || !o.action)) return { action: "reply", text: o.text };
+    const name = o.name || o.tool || o.function;
+    const args = o.args || o.parameters || o.arguments || {};
+    if (o.action === "tool" && typeof name === "string") return { action: "tool", name, args };
+    // direct: {"action":"remember","fact":"..."} ya {"action":"remember","args":{...}}
+    if (typeof o.action === "string" && KNOWN_TOOLS.has(o.action)) {
+      const a = { ...(typeof o.args === "object" && o.args ? o.args : {}) };
+      for (const [k, v] of Object.entries(o)) {
+        if (k !== "action" && k !== "args" && k !== "text") (a as any)[k] = v;
+      }
+      return { action: "tool", name: o.action, args: a };
+    }
+    if (typeof name === "string" && KNOWN_TOOLS.has(name)) return { action: "tool", name, args };
   } catch {}
   return null;
+}
+
+// User ko kachcha JSON kabhi mat bhejo
+export function looksLikeProtocol(text: string): boolean {
+  const t = text.trim();
+  return /^\{[\s\S]*\}$/.test(t) && /"(action|tool|function)"/.test(t);
 }
 
 function fmtContestList(name: string, startAt: Date, qs: { title: string }[]): string {
@@ -164,6 +191,9 @@ export async function brainReply(userText: string, history: string[] = [], userI
     if (/contest|leetcode/i.test(t)) n.push("contest");
     if (/(dikhao|dikha|show|list).*remind|remind.*(dikhao|dikha|show|list|batao)/i.test(t)) n.push("list_reminders");
     else if (/remind|yaad\s*dila|alarm|notify/i.test(t)) n.push("remind");
+    if (/yaad\s*rakh|remember|note\s*kar|save\s*kar.*(memory|yaad)/i.test(t)) n.push("remember");
+    else if (/bhool\s*ja|bhul\s*ja|forget/i.test(t)) n.push("forget");
+    else if (/(mera\s*naam|my\s*name\s*is|^i\s*am\s+[A-Z]|pasand\s*hai|mujhe.*pasand|my\s*favourite|my\s*favorite)\b/i.test(t)) n.push("remember");
     return n;
   };
   const required = needs(userText);
@@ -175,13 +205,25 @@ export async function brainReply(userText: string, history: string[] = [], userI
     if (!act) {
       const { cleanText } = await import("./groq.js");
       const t = cleanText(raw);
-      if (t) {
+      if (t && !looksLikeProtocol(t)) {
         pendingReply = t;
         break;
+      }
+      if (t) {
+        msgs.push({ role: "assistant", content: raw.slice(0, 500) });
+        msgs.push({ role: "user", content: "Galat format! JSON protocol follow karo ya seedha Hinglish jawab do — kachcha JSON user ko kabhi mat bhejo." });
+        continue;
       }
       throw new Error("brain: unparseable reply");
     }
     if (act.action === "reply") {
+      // Kachcha JSON user ko kabhi mat bhejo — dobara plain text mango
+      if (looksLikeProtocol(act.text)) {
+        console.log("[brain] JSON leak pakda, plain text dobara mang rahe...");
+        msgs.push({ role: "assistant", content: JSON.stringify(act) });
+        msgs.push({ role: "user", content: "Galat format! User ko JSON nahi, seedha Hinglish jawab do (reply action me, sirf text)." });
+        continue;
+      }
       pendingReply = act.text;
       const missing = required.filter((r) => !used.includes(r));
       if (missing.length > 0) {
