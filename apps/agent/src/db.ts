@@ -20,7 +20,8 @@ export async function recentHistory(userId: string, from: string, limit = 8): Pr
       .order("created_at", { ascending: false })
       .limit(limit);
     return ((data as any[] | null) || []).reverse().flatMap((r) => [`User: ${r.body}`, `Assistant: ${r.reply ?? ""}`]);
-  } catch {
+  } catch (e) {
+    console.error("[db] history fail:", (e as Error).message);
     return [];
   }
 }

@@ -35,11 +35,17 @@ export function startScheduler() {
         }
         if (!s.ownerNumber) s.ownerNumber = owner;
         try {
-          await sendWhatsAppMessage(r.user_id, `${owner}@s.whatsapp.net`, `⏰ Reminder: ${r.title}`);
+          // Claim-first: pehle sent=true (duplicate send roko), fail pe wapas false.
+          // Crash ke beech me phasne se miss ho sakta hai, par double-reminder nahi jayega.
           await sbAdmin!.from("Reminder").update({ sent: true }).eq("id", r.id);
+          await sendWhatsAppMessage(r.user_id, `${owner}@s.whatsapp.net`, `⏰ Reminder: ${r.title}`);
           console.log(`[cron] reminder bheja (${r.user_id.slice(0, 8)}): ${r.title}`);
         } catch (e) {
-          console.error("[cron] send fail:", (e as Error).message);
+          console.error("[cron] send fail, retry ke liye wapas:", (e as Error).message);
+          await sbAdmin!.from("Reminder").update({ sent: false }).eq("id", r.id).then(
+            () => {},
+            (e2) => console.error("[cron] unclaim fail:", (e2 as Error).message)
+          );
         }
       }
     } catch (e) {

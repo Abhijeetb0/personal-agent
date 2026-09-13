@@ -1,6 +1,7 @@
 import { sbAdmin } from "./sb.js";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { encryptJson, decryptJson } from "./crypto.js";
 
 // Per-user WhatsApp session persistence (Supabase WaSession + local auth dir).
 // Render ki disk ephemeral hai — restart pe yahi se wapas ayega.
@@ -17,7 +18,7 @@ export async function saveAuthToSupabase(userId: string, authDir: string, status
     }
     await sbAdmin.from("WaSession").upsert({
       user_id: userId,
-      auth_blob: blob,
+      auth_blob: encryptJson(blob),
       status,
       qr: qr ?? null,
     });
@@ -30,11 +31,13 @@ export async function restoreAuthFromSupabase(userId: string, authDir: string) {
   if (!sbAdmin) return;
   try {
     const { data } = await sbAdmin.from("WaSession").select("*").eq("user_id", userId).single();
-    const blob = (data as any)?.auth_blob as Record<string, string> | undefined;
+    const blob = decryptJson((data as any)?.auth_blob);
     if (!blob || Object.keys(blob).length === 0) return;
     await fs.mkdir(authDir, { recursive: true });
     for (const [f, content] of Object.entries(blob)) {
-      await fs.writeFile(path.join(authDir, f), content, "utf-8").catch(() => {});
+      await fs.writeFile(path.join(authDir, f), content, "utf-8").catch((e) =>
+        console.error(`[store] restore write fail ${f}:`, (e as Error).message)
+      );
     }
     console.log(`[store] session Supabase se restore ho gaya (${userId.slice(0, 8)})`);
   } catch (e) {
@@ -46,14 +49,18 @@ export async function setStatus(userId: string, status: string, qr?: string) {
   if (!sbAdmin) return;
   try {
     await sbAdmin.from("WaSession").upsert({ user_id: userId, status, qr: qr ?? null });
-  } catch {}
+  } catch (e) {
+    console.error("[store] setStatus fail:", (e as Error).message);
+  }
 }
 
 export async function clearSupabaseSession(userId: string) {
   if (!sbAdmin) return;
   try {
     await sbAdmin.from("WaSession").upsert({ user_id: userId, auth_blob: {}, status: "disconnected", qr: null });
-  } catch {}
+  } catch (e) {
+    console.error("[store] clear session fail:", (e as Error).message);
+  }
 }
 
 export async function listSessionUsers(): Promise<string[]> {
@@ -61,7 +68,8 @@ export async function listSessionUsers(): Promise<string[]> {
   try {
     const { data } = await sbAdmin.from("WaSession").select("user_id");
     return ((data as any[]) || []).map((r) => r.user_id);
-  } catch {
+  } catch (e) {
+    console.error("[store] list users fail:", (e as Error).message);
     return [];
   }
 }
@@ -73,7 +81,9 @@ export async function getOwnerNumber(userId: string): Promise<string> {
       const { data } = await sbAdmin.from("UserSetting").select("owner_number").eq("user_id", userId).single();
       const n = (data as any)?.owner_number as string | undefined;
       if (n) return n.replace(/[^0-9]/g, "");
-    } catch {}
+    } catch (e) {
+      console.error("[store] getOwner fail:", (e as Error).message);
+    }
   }
   return (process.env.OWNER_NUMBER || "").replace(/[^0-9]/g, "");
 }

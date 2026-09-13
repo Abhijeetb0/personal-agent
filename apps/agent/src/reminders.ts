@@ -8,7 +8,7 @@ export async function saveReminder(userId: string, title: string, remindAt: Date
   }
   const { data, error } = await sbAdmin
     .from("Reminder")
-    .insert({ user_id: userId, title, remindAt: remindAt.toISOString(), source })
+    .insert({ user_id: userId, title, remind_at: remindAt.toISOString(), source })
     .select()
     .single();
   if (error) throw error;

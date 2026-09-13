@@ -10,6 +10,7 @@ async function fromLeetCodeOfficial(): Promise<Contest | null> {
     body: JSON.stringify({
       query: "{ upcomingContests { title titleSlug startTime duration } }",
     }),
+    signal: AbortSignal.timeout(15000),
   } as any);
   if (!r.ok) throw new Error(`leetcode graphql ${r.status}`);
   const j = (await r.json()) as any;
@@ -28,6 +29,7 @@ async function fromLeetCodeOfficial(): Promise<Contest | null> {
 async function fromKontests(): Promise<Contest | null> {
   const r = await fetch("https://kontests.net/api/v1/leet_code", {
     headers: { "User-Agent": "personal-agent" },
+    signal: AbortSignal.timeout(15000),
   } as any);
   if (!r.ok) throw new Error(`kontests ${r.status}`);
   const list = (await r.json()) as any[];
@@ -67,6 +69,7 @@ export async function allLeetCodeContests(): Promise<{ name: string; slug: strin
     method: "POST",
     headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" },
     body: JSON.stringify({ query: "{ allContests { title titleSlug startTime } }" }),
+    signal: AbortSignal.timeout(15000),
   } as any);
   if (!r.ok) throw new Error(`leetcode graphql ${r.status}`);
   const j = (await r.json()) as any;
@@ -92,6 +95,7 @@ export async function contestQuestions(slug: string): Promise<{ title: string; u
     method: "POST",
     headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" },
     body: JSON.stringify({ query: `{ contest(titleSlug: "${slug}") { title questions { title titleSlug } } }` }),
+    signal: AbortSignal.timeout(15000),
   } as any);
   if (!q.ok) throw new Error(`leetcode questions ${q.status}`);
   const qj = (await q.json()) as any;

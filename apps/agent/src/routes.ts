@@ -6,6 +6,7 @@ import {
   getSession, ensureSession, sendWhatsAppMessage, resetSession, requestPairingCode,
 } from "./baileys.js";
 import { setOwnerNumber, getOwnerNumber } from "./store.js";
+import { normalize } from "./whitelist.js";
 import { nextLeetCodeContest, formatIST } from "./leetcode.js";
 
 declare global {
@@ -61,11 +62,17 @@ export function buildRoutes() {
   });
 
   // manual test: owner ko message bhejo (dashboard se test button)
+  // recipient lock: sirf apne owner number pe bhej sakte ho (spam/abuse rokne ke liye)
   app.post("/send", auth, async (req, res) => {
     try {
       const uid = needUser(req);
       const { to, text } = req.body as { to: string; text: string };
       if (!to || !text) return res.status(400).json({ error: "to + text chahiye" });
+      const owner = normalize(getSession(uid).ownerNumber || (await getOwnerNumber(uid)) || "");
+      const dest = normalize(to);
+      if (!owner || !dest) return res.status(400).json({ error: "owner number set karo, sahi number do" });
+      const same = dest === owner || (dest.length >= 10 && owner.length >= 10 && dest.slice(-10) === owner.slice(-10));
+      if (!same) return res.status(403).json({ error: "sirf apne owner number pe bhej sakte ho" });
       const jid = to.includes("@") ? to : `${to}@s.whatsapp.net`;
       await sendWhatsAppMessage(uid, jid, text);
       res.json({ ok: true });
