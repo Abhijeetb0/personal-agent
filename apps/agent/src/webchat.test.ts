@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { guardReply, validateWebChat, webChatReply } from "./webchat.js";
+import { guardReply, validateWebChat, webChatReply, mirrorText } from "./webchat.js";
 import { getSession, sendWhatsAppMessage } from "./baileys.js";
 import * as store from "./store.js";
 
@@ -52,8 +52,20 @@ describe("webChatReply (fastlane, no AI)", () => {
   }, 15000);
 });
 
+describe("mirrorText", () => {
+  it("sawal + jawab ek bubble me", () => {
+    const t = mirrorText("time kya hai", "12 baj rahe hain");
+    expect(t).toBe("💬 Web chat:\n❓ time kya hai\n💡 12 baj rahe hain");
+  });
+
+  it("lamba sawal 500 chars pe trim", () => {
+    const t = mirrorText("x".repeat(600), "ok");
+    expect(t).toContain("❓ " + "x".repeat(500));
+  });
+});
+
 describe("mirror to WhatsApp", () => {
-  it("mirror on + connected + owner ho to WhatsApp pe jata hai", async () => {
+  it("mirror on + connected + owner ho to WhatsApp pe ek combined bubble jata hai", async () => {
     vi.spyOn(store, "getOwnerNumber").mockResolvedValue("911234567890");
     vi.spyOn(store, "getWebMirror").mockResolvedValue(true);
     vi.mocked(getSession).mockReturnValue({ status: "connected" } as any);
@@ -62,7 +74,8 @@ describe("mirror to WhatsApp", () => {
     const [uid, jid, text] = vi.mocked(sendWhatsAppMessage).mock.calls[0]!;
     expect(uid).toBe("test-user");
     expect(jid).toBe("911234567890@s.whatsapp.net");
-    expect(text.startsWith("💬 (web) ")).toBe(true);
+    expect(text).toContain("❓ time kya hai");
+    expect(text).toContain("💡 ");
     expect(r.length).toBeGreaterThan(0);
   }, 15000);
 

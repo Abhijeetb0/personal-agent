@@ -39,7 +39,7 @@ export async function webChatReply(userId: string, raw: unknown): Promise<string
     const fast = await tryFastLane(text);
     if (fast) {
       await logMessage(userId, WEBCHAT_FROM, text, fast, true);
-      await mirrorToWhatsApp(userId, owner, fast);
+      await mirrorToWhatsApp(userId, owner, text, fast);
       return fast;
     }
   } catch (e) {
@@ -48,13 +48,18 @@ export async function webChatReply(userId: string, raw: unknown): Promise<string
   const history = await recentHistory(userId, from);
   reply = guardReply(await getAiReply(text, history, userId));
   await logMessage(userId, WEBCHAT_FROM, text, reply, true);
-  await mirrorToWhatsApp(userId, owner, reply);
+  await mirrorToWhatsApp(userId, owner, text, reply);
   return reply;
 }
 
-// Mirror: web wala jawab WhatsApp pe bhi (toggle on + connected ho to).
+// Mirror: ek combined bubble (sawal + jawab) WhatsApp pe (toggle on + connected ho to).
 // Fail ho to sirf log — web reply KABHI nahi rukega.
-async function mirrorToWhatsApp(userId: string, owner: string, reply: string) {
+export function mirrorText(question: string, reply: string): string {
+  const q = question.trim().slice(0, 500);
+  return `💬 Web chat:\n❓ ${q}\n💡 ${reply}`;
+}
+
+async function mirrorToWhatsApp(userId: string, owner: string, question: string, reply: string) {
   try {
     if (!(await getWebMirror(userId))) return;
     if (!owner) return;
@@ -62,7 +67,7 @@ async function mirrorToWhatsApp(userId: string, owner: string, reply: string) {
       logger.info({ userId: userId.slice(0, 8) }, "[webchat] mirror skip: WhatsApp connected nahi");
       return;
     }
-    await sendWhatsAppMessage(userId, `${owner}@s.whatsapp.net`, `💬 (web) ${reply}`);
+    await sendWhatsAppMessage(userId, `${owner}@s.whatsapp.net`, mirrorText(question, reply));
     logger.info({ userId: userId.slice(0, 8) }, "[webchat] mirrored to WhatsApp");
   } catch (e) {
     logger.error({ err: e }, "[webchat] mirror fail (web reply ok)");
