@@ -8,7 +8,8 @@ import {
 import { setOwnerNumber, getOwnerNumber } from "./store.js";
 import { normalize } from "./whitelist.js";
 import { nextLeetCodeContest, formatIST, allLeetCodeContests, upcomingContests, pastContests } from "./leetcode.js";
-import { generalLimiter, sensitiveLimiter, sendLimiter } from "./rateLimit.js";
+import { generalLimiter, sensitiveLimiter, sendLimiter, chatLimiter } from "./rateLimit.js";
+import { validateWebChat, webChatReply } from "./webchat.js";
 
 declare global {
   namespace Express {
@@ -140,6 +141,21 @@ export function buildRoutes() {
     const c = await nextLeetCodeContest();
     if (!c) return res.json({ contest: null });
     res.json({ contest: { name: c.name, startAt: c.startAt, startIST: formatIST(c.startAt), url: c.url } });
+  });
+
+  // Dashboard web-chat: brain se seedha baat (WhatsApp pe kuch nahi jata)
+  app.post("/chat", auth, chatLimiter, async (req, res) => {
+    try {
+      validateWebChat((req.body as any)?.text);
+    } catch (e) {
+      return res.status(400).json({ error: (e as Error).message });
+    }
+    try {
+      const reply = await webChatReply(needUser(req), (req.body as any)?.text);
+      res.json({ reply });
+    } catch (e) {
+      res.status(502).json({ error: (e as Error).message || "AI se jawab nahi aaya" });
+    }
   });
 
   // Dashboard contests tab: upcoming (pehle 3) + past (pehle 3) — 10-min cache agent me

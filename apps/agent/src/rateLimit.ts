@@ -29,3 +29,13 @@ export const sendLimiter = rateLimit({
   keyGenerator: (req) => req.ip || req.socket.remoteAddress || "unknown",
   message: { error: "Bahut zyada messages — 1 min ruk ke fir bhejo." },
 });
+
+// Chat: 10 req/min — web se brain baat (AI cost bachao, fir bhi smooth)
+export const chatLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.ip || req.socket.remoteAddress || "unknown",
+  message: { error: "Thoda slow — 1 min me 10 sawal tak." },
+});

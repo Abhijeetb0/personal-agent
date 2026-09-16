@@ -65,6 +65,9 @@ export default function Dashboard() {
   const [editingMem, setEditingMem] = useState<string | null>(null);
   const [editMemText, setEditMemText] = useState("");
   const [toast, setToast] = useState<string | null>(null);
+  // #3 web chat composer
+  const [chatInput, setChatInput] = useState("");
+  const [chatSending, setChatSending] = useState(false);
   // #5 activity stats
   const [activity, setActivity] = useState<string[]>([]);
   // #7 notifications
@@ -241,6 +244,14 @@ export default function Dashboard() {
     setTimeout(() => setToast(null), 2600);
   }
 
+  // RLS: insert me user_id explicit chahiye (policy: auth.uid() = user_id)
+  async function myUserId(): Promise<string> {
+    const { data } = await supabaseBrowser().auth.getUser();
+    const id = data.user?.id;
+    if (!id) throw new Error("Login expire ho gaya — dobara login karo");
+    return id;
+  }
+
   function openRemModal() {
     setRemTitle("");
     setRemWhen(toLocalInput(new Date(Date.now() + 60 * 60 * 1000)));
@@ -256,9 +267,16 @@ export default function Dashboard() {
     if (!remWhen || isNaN(at.getTime())) { setRemErr("Date + time chuno"); return; }
     if (at.getTime() <= Date.now()) { setRemErr("Future ka time chuno"); return; }
     setRemSaving(true);
-    const { error } = await supabaseBrowser().from("Reminder").insert({ title: t.slice(0, 200), remind_at: at.toISOString(), source: "web" });
+    try {
+      const user_id = await myUserId();
+      const { error } = await supabaseBrowser().from("Reminder").insert({ user_id, title: t.slice(0, 200), remind_at: at.toISOString(), source: "web" });
+      if (error) throw error;
+    } catch (e: any) {
+      setRemSaving(false);
+      setRemErr("Save fail: " + (e.message || "pata nahi"));
+      return;
+    }
     setRemSaving(false);
-    if (error) { setRemErr("Save fail: " + error.message); return; }
     setShowRemModal(false);
     setRemTitle("");
     setRemWhen("");
@@ -269,8 +287,14 @@ export default function Dashboard() {
   async function addMemory() {
     const f = memNew.trim().slice(0, 300);
     if (!f) return;
-    const { error } = await supabaseBrowser().from("Memory").insert({ fact: f });
-    if (error) { flash("Save fail — fir try karo"); return; }
+    try {
+      const user_id = await myUserId();
+      const { error } = await supabaseBrowser().from("Memory").insert({ user_id, fact: f });
+      if (error) throw error;
+    } catch {
+      flash("Save fail — fir try karo");
+      return;
+    }
     setMemNew("");
     flash("🧠 Yaad kar liya!");
     load();
@@ -289,14 +313,50 @@ export default function Dashboard() {
   async function remindForContest(c: ContestFull) {
     const at = new Date(new Date(c.startAt).getTime() - 30 * 60 * 1000);
     if (at.getTime() <= Date.now()) { flash("Ye contest shuru ho chuka hai"); return; }
-    const { error } = await supabaseBrowser().from("Reminder").insert({
-      title: `LeetCode: ${c.name} shuru hone wala hai`,
-      remind_at: at.toISOString(),
-      source: "leetcode",
-    });
-    if (error) { flash("Reminder fail — fir try karo"); return; }
+    try {
+      const user_id = await myUserId();
+      const { error } = await supabaseBrowser().from("Reminder").insert({
+        user_id,
+        title: `LeetCode: ${c.name} shuru hone wala hai`,
+        remind_at: at.toISOString(),
+        source: "leetcode",
+      });
+      if (error) throw error;
+    } catch {
+      flash("Reminder fail — fir try karo");
+      return;
+    }
     flash("🏆 Contest reminder set — 30 min pehle ping ayega!");
     load();
+  }
+
+  async function sendChat() {
+    const text = chatInput.trim();
+    if (!text || chatSending) return;
+    setChatInput("");
+    setChatSending(true);
+    const now = new Date().toISOString();
+    setChat((prev) => [...prev, { body: text, reply: null, created_at: now }]);
+    try {
+      const r = await fetch("/api/agent-chat", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || "fail");
+      setChat((prev) => {
+        const c = [...prev];
+        c[c.length - 1] = { ...c[c.length - 1]!, reply: j.reply };
+        return c;
+      });
+    } catch {
+      setChat((prev) => {
+        const c = [...prev];
+        c[c.length - 1] = { ...c[c.length - 1]!, reply: "⚠️ " + tr(lang, "ch.err") };
+        return c;
+      });
+    }
+    setChatSending(false);
   }
 
   // ---- derived state ----
@@ -663,7 +723,19 @@ export default function Dashboard() {
                 <h1>{tr(lang, "ch.title")}</h1>
                 <p>{tr(lang, "ch.sub")}</p>
               </div>
-              {chat.length === 0 ? (
+              <div className="card">
+                <div className="row">
+                  <input
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.currentTarget.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") sendChat(); }}
+                    placeholder={tr(lang, "ch.ph")}
+                    maxLength={1000}
+                  />
+                  <button onClick={sendChat} disabled={!chatInput.trim() || chatSending}>{chatSending ? "…" : tr(lang, "ch.send")}</button>
+                </div>
+              </div>
+              {chat.length === 0 && !chatSending ? (
                 <EmptyState icon="💬" title="Abhi koi baat nahi hui">Pehla <b>hi</b> bhej ke dekho!</EmptyState>
               ) : (
                 <div className="card">
@@ -674,6 +746,7 @@ export default function Dashboard() {
                         {m.reply && <div className="bubble a">{m.reply}</div>}
                       </div>
                     ))}
+                    {chatSending && <div className="bubble a typing-dots">{tr(lang, "ch.typing")}<span>.</span><span>.</span><span>.</span></div>}
                   </div>
                 </div>
               )}
