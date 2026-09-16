@@ -68,6 +68,22 @@ export default function Dashboard() {
   // #3 web chat composer
   const [chatInput, setChatInput] = useState("");
   const [chatSending, setChatSending] = useState(false);
+  const chatBoxRef = useRef<HTMLDivElement | null>(null);
+  const chatInputRef = useRef<HTMLInputElement | null>(null);
+  const stickBottom = useRef(true);
+
+  // Naya message/reply aaye to neeche scroll — par sirf tab jab user pehle se neeche ho
+  // (purana padh raha ho to force mat karo)
+  useEffect(() => {
+    const el = chatBoxRef.current;
+    if (el && stickBottom.current) el.scrollTop = el.scrollHeight;
+  }, [chat, chatSending, tab]);
+
+  function onChatScroll() {
+    const el = chatBoxRef.current;
+    if (!el) return;
+    stickBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+  }
   // #5 activity stats
   const [activity, setActivity] = useState<string[]>([]);
   // #7 notifications
@@ -335,6 +351,7 @@ export default function Dashboard() {
     if (!text || chatSending) return;
     setChatInput("");
     setChatSending(true);
+    stickBottom.current = true; // bhejte hi neeche jao
     const now = new Date().toISOString();
     setChat((prev) => [...prev, { body: text, reply: null, created_at: now }]);
     try {
@@ -357,6 +374,7 @@ export default function Dashboard() {
       });
     }
     setChatSending(false);
+    chatInputRef.current?.focus(); // lagatar type kar sako — cursor wapas
   }
 
   // ---- derived state ----
@@ -723,33 +741,36 @@ export default function Dashboard() {
                 <h1>{tr(lang, "ch.title")}</h1>
                 <p>{tr(lang, "ch.sub")}</p>
               </div>
-              <div className="card">
-                <div className="row">
-                  <input
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.currentTarget.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") sendChat(); }}
-                    placeholder={tr(lang, "ch.ph")}
-                    maxLength={1000}
-                  />
-                  <button onClick={sendChat} disabled={!chatInput.trim() || chatSending}>{chatSending ? "…" : tr(lang, "ch.send")}</button>
-                </div>
-              </div>
-              {chat.length === 0 && !chatSending ? (
-                <EmptyState icon="💬" title="Abhi koi baat nahi hui">Pehla <b>hi</b> bhej ke dekho!</EmptyState>
-              ) : (
+              <div className="chat-shell">
                 <div className="card">
-                  <div className="chat">
-                    {chat.map((m, i) => (
-                      <div key={i} style={{ display: "contents" }}>
-                        <div className="bubble u">{m.body}<small>{new Date(m.created_at).toLocaleString("en-IN")}</small></div>
-                        {m.reply && <div className="bubble a">{m.reply}</div>}
-                      </div>
-                    ))}
-                    {chatSending && <div className="bubble a typing-dots">{tr(lang, "ch.typing")}<span>.</span><span>.</span><span>.</span></div>}
+                  {chat.length === 0 && !chatSending ? (
+                    <EmptyState icon="💬" title="Abhi koi baat nahi hui">Pehla <b>hi</b> bhej ke dekho!</EmptyState>
+                  ) : (
+                    <div className="chat" ref={chatBoxRef} onScroll={onChatScroll}>
+                      {chat.map((m, i) => (
+                        <div key={i} style={{ display: "contents" }}>
+                          <div className="bubble u">{m.body}<small>{new Date(m.created_at).toLocaleString("en-IN")}</small></div>
+                          {m.reply && <div className="bubble a">{m.reply}</div>}
+                        </div>
+                      ))}
+                      {chatSending && <div className="bubble a typing-dots">{tr(lang, "ch.typing")}<span>.</span><span>.</span><span>.</span></div>}
+                    </div>
+                  )}
+                </div>
+                <div className="card chat-composer">
+                  <div className="row">
+                    <input
+                      ref={chatInputRef}
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.currentTarget.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") sendChat(); }}
+                      placeholder={tr(lang, "ch.ph")}
+                      maxLength={1000}
+                    />
+                    <button onClick={sendChat} disabled={!chatInput.trim() || chatSending}>{chatSending ? "…" : tr(lang, "ch.send")}</button>
                   </div>
                 </div>
-              )}
+              </div>
             </>
           )}
         </main>
