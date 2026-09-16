@@ -1,7 +1,11 @@
+"use client";
 import Link from "next/link";
 import { Brand } from "./components/ui";
+import { useLang, LangToggle } from "./components/lang";
+import { tr } from "../lib/i18n";
 
 export default function Home() {
+  const [lang, setLang] = useLang();
   return (
     <>
       <nav className="nav">
@@ -10,44 +14,42 @@ export default function Home() {
             <Brand sub="WhatsApp AI" />
           </Link>
           <div className="nav-links">
-            <Link className="btn ghost sm" href="/dashboard">Dashboard</Link>
-            <Link className="btn sm" href="/login">Login / Signup</Link>
+            <LangToggle lang={lang} onChange={setLang} />
+            <Link className="btn ghost sm" href="/dashboard">{tr(lang, "nav.dashboard")}</Link>
+            <Link className="btn sm" href="/login">{tr(lang, "nav.login")}</Link>
           </div>
         </div>
       </nav>
       <main className="container">
         <div className="hero">
-          <span className="hero-badge">✨ 100% free stack · tumhara khud ka AI</span>
-          <h1>Tumhara WhatsApp,<br />ab <span className="grad">super-smart.</span></h1>
-          <p className="sub">
-            Reminders, LeetCode contests, sawal-jawab, long-term memory —
-            sab kuch seedha WhatsApp pe. Apna number link karo aur baat karna shuru karo.
-          </p>
+          <span className="hero-badge">{tr(lang, "land.badge")}</span>
+          <h1>{tr(lang, "land.h1a")}<br />{tr(lang, "land.h1mid")} <span className="grad">{tr(lang, "land.h1b")}</span></h1>
+          <p className="sub">{tr(lang, "land.sub")}</p>
           <div className="hero-cta">
-            <Link className="btn" href="/login">🚀 Shuru karo — free</Link>
-            <Link className="btn ghost" href="/dashboard">Dashboard kholo</Link>
+            <Link className="btn" href="/login">{tr(lang, "land.cta1")}</Link>
+            <Link className="btn ghost" href="/dashboard">{tr(lang, "land.cta2")}</Link>
           </div>
-          <p className="muted hero-meta">● Agent live · Groq + Gemini brain · Supabase memory</p>
+          <p className="muted hero-meta">{tr(lang, "land.meta")}</p>
         </div>
 
         <div className="steps-strip">
           <div className="step-mini">
-            <b><span className="step-num">1</span> Account banao</b>
-            <p>Email + password se 30 second me signup. Har user ka data alag, private.</p>
+            <b><span className="step-num">1</span> {tr(lang, "land.s1t")}</b>
+            <p>{tr(lang, "land.s1d")}</p>
           </div>
           <div className="step-mini">
-            <b><span className="step-num">2</span> WhatsApp link karo</b>
-            <p>QR scan ya 8-digit pairing code — agent wala number link ho jayega.</p>
+            <b><span className="step-num">2</span> {tr(lang, "land.s2t")}</b>
+            <p>{tr(lang, "land.s2d")}</p>
           </div>
           <div className="step-mini">
-            <b><span className="step-num">3</span> Baat karo</b>
-            <p>Apne owner number se message bhejo. Agent sirf tumko reply karega.</p>
+            <b><span className="step-num">3</span> {tr(lang, "land.s3t")}</b>
+            <p>{tr(lang, "land.s3d")}</p>
           </div>
         </div>
 
         <div className="section-title">
-          <h2>Features</h2>
-          <p>WhatsApp pe bas bolo — ho jayega</p>
+          <h2>{tr(lang, "land.feat")}</h2>
+          <p>{tr(lang, "land.featSub")}</p>
         </div>
         <div className="feat-grid">
           <div className="feat">
@@ -73,12 +75,12 @@ export default function Home() {
         </div>
 
         <div className="cta-band">
-          <h2>2 minute me live ho jao ⚡</h2>
-          <p>Signup → QR scan → <code>hi</code> bhejo. Bas.</p>
-          <Link className="btn" href="/login">Account banao →</Link>
+          <h2>{tr(lang, "land.ctaH")}</h2>
+          <p>{tr(lang, "land.ctaP")}</p>
+          <Link className="btn" href="/login">{tr(lang, "land.ctaB")}</Link>
         </div>
 
-        <p className="muted footer">Unofficial WhatsApp bridge (Baileys) — personal use ke liye. Spam mat karo. 💚</p>
+        <p className="muted footer">{tr(lang, "land.foot")}</p>
       </main>
     </>
   );

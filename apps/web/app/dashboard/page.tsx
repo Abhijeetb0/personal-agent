@@ -1,7 +1,9 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabaseBrowser } from "../../lib/supabase-browser";
 import { Brand, StatusPill, StatCard, EmptyState, SectionHeader, Skeleton, type ConnTone } from "../components/ui";
+import { useLang, LangToggle } from "../components/lang";
+import { tr } from "../../lib/i18n";
 
 type Status = { status: string; connected: boolean; ownerNumber: string | null; reconnectAttempts?: number; reconnectInSec?: number | null; lastClose?: { code: unknown; detail: string; at: number } | null };
 type Qr = { status: string; dataUrl: string | null };
@@ -13,13 +15,13 @@ type ContestFull = { name: string; startAt: string; startIST: string; url: strin
 
 type Tab = "overview" | "connect" | "contests" | "rems" | "mem" | "chat";
 
-const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: "overview", label: "Overview", icon: "📊" },
-  { id: "connect", label: "Connect", icon: "🔗" },
-  { id: "contests", label: "Contests", icon: "🏆" },
-  { id: "rems", label: "Reminders", icon: "⏰" },
-  { id: "mem", label: "Memory", icon: "🧠" },
-  { id: "chat", label: "Chat", icon: "💬" },
+const TABS: { id: Tab; icon: string }[] = [
+  { id: "overview", icon: "📊" },
+  { id: "connect", icon: "🔗" },
+  { id: "contests", icon: "🏆" },
+  { id: "rems", icon: "⏰" },
+  { id: "mem", icon: "🧠" },
+  { id: "chat", icon: "💬" },
 ];
 
 function relTime(iso: string): string {
@@ -34,6 +36,7 @@ function relTime(iso: string): string {
 
 export default function Dashboard() {
   const [tab, setTab] = useState<Tab>("overview");
+  const [lang, setLang] = useLang();
   const [status, setStatus] = useState<Status | null>(null);
   const [qr, setQr] = useState<Qr | null>(null);
   const [owner, setOwner] = useState("");
@@ -62,6 +65,67 @@ export default function Dashboard() {
   const [editingMem, setEditingMem] = useState<string | null>(null);
   const [editMemText, setEditMemText] = useState("");
   const [toast, setToast] = useState<string | null>(null);
+  // #5 activity stats
+  const [activity, setActivity] = useState<string[]>([]);
+  // #7 notifications
+  const [notifOn, setNotifOn] = useState(false);
+  const prevConn = useRef<boolean | null>(null);
+  const notified = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    try { if (localStorage.getItem("pa-notif") === "1") setNotifOn(true); } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (!notifOn || typeof Notification === "undefined" || Notification.permission !== "granted") {
+      if (status) prevConn.current = status.connected;
+      return;
+    }
+    if (prevConn.current === true && status && !status.connected) {
+      try { new Notification("Personal Agent 🔌", { body: "Agent offline ho gaya — auto-reconnect chal raha hai." }); } catch {}
+    }
+    if (status) prevConn.current = status.connected;
+    const now = Date.now();
+    for (const r of rems.filter((x) => !x.sent)) {
+      const ms = new Date(r.remind_at).getTime() - now;
+      if (ms > 0 && ms < 5 * 60 * 1000 && !notified.current.has(r.id)) {
+        notified.current.add(r.id);
+        try { new Notification("⏰ Reminder nazdeek hai", { body: r.title }); } catch {}
+      }
+    }
+  }, [status, rems, notifOn]);
+
+  async function toggleNotif() {
+    if (notifOn) {
+      setNotifOn(false);
+      try { localStorage.setItem("pa-notif", "0"); } catch {}
+      return;
+    }
+    if (typeof Notification === "undefined") { flash("Is browser me notifications nahi hain"); return; }
+    const p = await Notification.requestPermission();
+    if (p === "granted") {
+      setNotifOn(true);
+      try { localStorage.setItem("pa-notif", "1"); } catch {}
+      flash("🔔 Notifications on!");
+    } else {
+      flash("Permission nahi mili — browser settings dekho");
+    }
+  }
+
+  function last7(): { label: string; count: number }[] {
+    const days: { label: string; count: number }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      days.push({ label: d.toLocaleDateString("en-IN", { weekday: "narrow" }), count: 0 });
+    }
+    for (const iso of activity) {
+      const t = new Date(iso);
+      const diff = Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(t).setHours(0, 0, 0, 0)) / 86400000);
+      if (diff >= 0 && diff < 7) days[6 - diff]!.count += 1;
+    }
+    return days;
+  }
 
   async function load() {
     try {
@@ -87,6 +151,8 @@ export default function Dashboard() {
       if (r2.data) setMems(r2.data as Memory[]);
       const r3 = await sb.from("Message").select("body,reply,created_at").order("created_at", { ascending: false }).limit(20);
       if (r3.data) setChat((r3.data as Msg[]).reverse());
+      const r4 = await sb.from("Message").select("created_at").order("created_at", { ascending: false }).limit(200);
+      if (r4.data) setActivity((r4.data as { created_at: string }[]).map((x) => x.created_at));
     } catch {}
   }
 
@@ -264,7 +330,7 @@ export default function Dashboard() {
     <>
       {TABS.map((t) => (
         <button key={t.id} className={itemCls(t.id)} onClick={() => setTab(t.id)}>
-          <span>{t.icon}</span> {t.label}
+          <span>{t.icon}</span> {tr(lang, `tab.${t.id}` as "tab.overview")}
           {t.id === "rems" && pending.length > 0 && <span className="count-badge">{pending.length}</span>}
           {t.id === "mem" && mems.length > 0 && <span className="count-badge">{mems.length}</span>}
         </button>
@@ -278,6 +344,8 @@ export default function Dashboard() {
         <div className="nav-inner">
           <span className="brand"><Brand sub="Dashboard" /></span>
           <div className="nav-links">
+            <LangToggle lang={lang} onChange={setLang} />
+            <button className="ghost sm" onClick={toggleNotif} title={notifOn ? "Notifications on — band karo" : "Browser notifications on karo"} style={{ padding: "8px 12px" }}>{notifOn ? "🔔" : "🔕"}</button>
             <StatusPill tone={tone}>{statusText}</StatusPill>
           </div>
         </div>
@@ -300,7 +368,7 @@ export default function Dashboard() {
           </div>
           {nav("side-nav", (t) => `side-item${tab === t ? " active" : ""}`)}
           <div className="side-foot">
-            <button className="side-item side-logout" onClick={logout}>↩ Logout</button>
+            <button className="side-item side-logout" onClick={logout}>{tr(lang, "nav.logout")}</button>
           </div>
         </aside>
 
@@ -308,8 +376,8 @@ export default function Dashboard() {
           {tab === "overview" && (
             <>
               <div className="page-head">
-                <h1>Overview 👋</h1>
-                <p>Tumhare agent ka live haal — ek nazar me.</p>
+                <h1>{tr(lang, "ov.title")}</h1>
+                <p>{tr(lang, "ov.sub")}</p>
               </div>
 
               <div className={`status-hero${connected ? "" : isQr || tone === "wait" ? " wait" : " dead"}`}>
@@ -349,6 +417,20 @@ export default function Dashboard() {
                 <StatCard label="🏆 Contest" value={contest ? "✓" : "…"} hint={contest ? contest.name.slice(0, 18) : "load..."} />
               </div>
 
+              <div className="card">
+                <h2>📈 Activity — pichhle 7 din</h2>
+                <p className="desc">{activity.length === 0 ? "Abhi koi data nahi — baat karna shuru karo!" : `Kul ${activity.length} messages (recent 200 me se)`}</p>
+                <div className="activity-bar">
+                  {last7().map((d, i, arr) => {
+                    const max = Math.max(1, ...arr.map((x) => x.count));
+                    return <div key={i} className={`bar${d.count === 0 ? " dim" : ""}`} style={{ height: `${Math.max(6, Math.round((d.count / max) * 100))}%` }} title={`${d.count} messages`} />;
+                  })}
+                </div>
+                <div className="activity-days">
+                  {last7().map((d, i) => <span key={i}>{d.label}</span>)}
+                </div>
+              </div>
+
               {contest && (
                 <div className="card">
                   <h2>🏆 Next LeetCode Contest</h2>
@@ -376,8 +458,8 @@ export default function Dashboard() {
           {tab === "connect" && (
             <>
               <div className="page-head">
-                <h1>Connect 🔗</h1>
-                <p>Owner number + WhatsApp linking — sab kuch yahi se.</p>
+                <h1>{tr(lang, "co.title")}</h1>
+                <p>{tr(lang, "co.sub")}</p>
               </div>
 
               <div className="card">
@@ -406,8 +488,8 @@ export default function Dashboard() {
                   )}
                   <div style={{ flex: 1, minWidth: 200 }}>
                     <StatusPill tone={tone}>{statusText}</StatusPill>
-                    <p style={{ marginTop: 12 }}>
-                      <button className="ghost sm" onClick={newQr} disabled={busy}>{busy ? "Ban raha..." : "🔄 Naya QR lo"}</button>
+                      <p style={{ marginTop: 12 }}>
+                      <button className="ghost sm" onClick={newQr} disabled={busy}>{busy ? "Ban raha..." : tr(lang, "btn.newQr")}</button>
                     </p>
                     <p className="muted">Aadha-fasa lage to hi Naya QR dabao — warna auto-reconnect ka wait karo.</p>
                   </div>
@@ -419,7 +501,7 @@ export default function Dashboard() {
                 <p className="desc">Number dalo → code lo → us phone me Linked Devices → “Link with phone number instead” me 1–2 min me type karo.</p>
                 <div className="row">
                   <input value={agentNum} onChange={(e) => setAgentNum(e.currentTarget.value)} placeholder="91XXXXXXXXXX (agent SIM)" inputMode="numeric" />
-                  <button onClick={getPairCode} disabled={busy}>{busy ? "..." : "Pairing code lo"}</button>
+                  <button onClick={getPairCode} disabled={busy}>{busy ? "..." : tr(lang, "btn.pairing")}</button>
                 </div>
                 {pairCode && (<><p className="code">{pairCode}</p><p className="muted">Ye code <b>{pairNum}</b> ke liye hai — usi phone me type karo.</p></>)}
                 {pairErr && <p className="err">{pairErr}</p>}
@@ -430,7 +512,7 @@ export default function Dashboard() {
                 <p className="desc">Owner number pe agent se ek message bhej ke connection verify karo.</p>
                 <textarea value={testText} onChange={(e) => setTestText(e.currentTarget.value)} rows={2} maxLength={500} placeholder="Kuch likho…" />
                 <p className="char-count">{testText.length}/500</p>
-                <button onClick={sendTest} disabled={!testText.trim() || !owner.trim()}>Send test →</button>
+                <button onClick={sendTest} disabled={!testText.trim() || !owner.trim()}>{tr(lang, "btn.sendTest")}</button>
                 {testMsg && <p className={testMsg.startsWith("Bhej diya") ? "ok-text" : testMsg === "bhej rahe..." ? "muted" : "err"} style={{ marginTop: 10 }}>{testMsg === "bhej rahe..." ? "⏳ " + testMsg : testMsg}</p>}
                 {!owner.trim() && <p className="muted">Pehle upar owner number save karo.</p>}
               </div>
@@ -440,8 +522,8 @@ export default function Dashboard() {
           {tab === "contests" && (
             <>
               <div className="page-head">
-                <h1>Contests 🏆</h1>
-                <p>Live LeetCode contests — one-click reminder ke saath.</p>
+                <h1>{tr(lang, "ct.title")}</h1>
+                <p>{tr(lang, "ct.sub")}</p>
               </div>
               {!contests ? (
                 <div className="card"><Skeleton h={20} w="60%" /><div style={{ height: 10 }} /><Skeleton h={14} /><div style={{ height: 8 }} /><Skeleton h={14} w="80%" /></div>
@@ -456,7 +538,7 @@ export default function Dashboard() {
                           <p className="desc" style={{ marginBottom: 4 }}>{contests.upcoming[0]!.startIST} IST · <b style={{ color: "var(--accent-2)" }}>{relTime(contests.upcoming[0]!.startAt)}</b></p>
                           <a href={contests.upcoming[0]!.url} target="_blank" rel="noreferrer">LeetCode pe kholo →</a>
                         </div>
-                        <button onClick={() => remindForContest(contests.upcoming[0]!)}>⏰ 30 min pehle yaad dila</button>
+                        <button onClick={() => remindForContest(contests.upcoming[0]!)}>{tr(lang, "btn.remindMe")}</button>
                       </div>
                     </div>
                   )}
@@ -466,7 +548,7 @@ export default function Dashboard() {
                       <ul className="list">
                         {contests.upcoming.slice(1).map((c, i) => (
                           <li key={i}>
-                            <div className="contest-row"><b>🗓 {c.name}</b><button className="ghost sm" onClick={() => remindForContest(c)}>⏰ remind</button></div>
+                            <div className="contest-row"><b>🗓 {c.name}</b><button className="ghost sm" onClick={() => remindForContest(c)}>{tr(lang, "btn.remindShort")}</button></div>
                             <small>{c.startIST} IST · {relTime(c.startAt)}</small>
                           </li>
                         ))}
@@ -498,10 +580,10 @@ export default function Dashboard() {
             <>
               <div className="tab-head">
                 <div className="page-head">
-                  <h1>Reminders ⏰</h1>
-                  <p>WhatsApp se banao (“10 min me yaad dila”), ya yahi se set karo.</p>
+                  <h1>{tr(lang, "re.title")}</h1>
+                  <p>{tr(lang, "re.sub")}</p>
                 </div>
-                <button className="sm" onClick={openRemModal}>＋ Naya</button>
+                <button className="sm" onClick={openRemModal}>{tr(lang, "btn.new")}</button>
               </div>
               {rems.length === 0 ? (
                 <EmptyState icon="⏰" title="Koi reminder nahi">WhatsApp pe bolo <b>“10 min me yaad dila dena”</b> — yahi dikhega.</EmptyState>
@@ -541,13 +623,13 @@ export default function Dashboard() {
           {tab === "mem" && (
             <>
               <div className="page-head">
-                <h1>Memory 🧠</h1>
-                <p>WhatsApp pe “yaad rakhna...” bola to yaha save hota hai — ya khud likh do.</p>
+                <h1>{tr(lang, "me.title")}</h1>
+                <p>{tr(lang, "me.sub")}</p>
               </div>
               <div className="card">
                 <div className="row">
                   <input value={memNew} onChange={(e) => setMemNew(e.currentTarget.value)} placeholder="Yaad rakhna: mera naam…" maxLength={300} />
-                  <button onClick={addMemory} disabled={!memNew.trim()}>Yaad rakho</button>
+                  <button onClick={addMemory} disabled={!memNew.trim()}>{tr(lang, "btn.remember")}</button>
                 </div>
                 {memNew.trim() && <p className="char-count">{memNew.trim().length}/300</p>}
               </div>
@@ -561,8 +643,8 @@ export default function Dashboard() {
                         <div className="inline-edit">
                           <textarea value={editMemText} onChange={(e) => setEditMemText(e.currentTarget.value)} rows={2} maxLength={300} />
                           <div className="row">
-                            <button className="sm" onClick={() => saveMemEdit(m.id)}>Save</button>
-                            <button className="ghost sm" onClick={() => setEditingMem(null)}>Cancel</button>
+                            <button className="sm" onClick={() => saveMemEdit(m.id)}>{tr(lang, "btn.save")}</button>
+                            <button className="ghost sm" onClick={() => setEditingMem(null)}>{tr(lang, "btn.cancel")}</button>
                           </div>
                         </div>
                       ) : (
@@ -578,8 +660,8 @@ export default function Dashboard() {
           {tab === "chat" && (
             <>
               <div className="page-head">
-                <h1>Chat 💬</h1>
-                <p>Recent baatcheet — latest neeche.</p>
+                <h1>{tr(lang, "ch.title")}</h1>
+                <p>{tr(lang, "ch.sub")}</p>
               </div>
               {chat.length === 0 ? (
                 <EmptyState icon="💬" title="Abhi koi baat nahi hui">Pehla <b>hi</b> bhej ke dekho!</EmptyState>
@@ -616,8 +698,8 @@ export default function Dashboard() {
             <input id="rem-when" type="datetime-local" value={remWhen} onChange={(e) => setRemWhen(e.currentTarget.value)} />
             {remErr && <p className="err">{remErr}</p>}
             <div className="modal-actions">
-              <button className="ghost" onClick={() => setShowRemModal(false)}>Cancel</button>
-              <button onClick={saveReminder} disabled={remSaving}>{remSaving ? "Save..." : "⏰ Set karo"}</button>
+              <button className="ghost" onClick={() => setShowRemModal(false)}>{tr(lang, "btn.cancel")}</button>
+              <button onClick={saveReminder} disabled={remSaving}>{remSaving ? "Save..." : tr(lang, "btn.setRemind")}</button>
             </div>
           </div>
         </div>
