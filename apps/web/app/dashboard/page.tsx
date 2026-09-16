@@ -13,7 +13,7 @@ type Msg = { body: string; reply: string | null; created_at: string };
 type Contest = { name: string; startIST: string } | null;
 type ContestFull = { name: string; startAt: string; startIST: string; url: string };
 
-type Tab = "overview" | "connect" | "contests" | "rems" | "mem" | "chat";
+type Tab = "overview" | "connect" | "contests" | "rems" | "mem" | "chat" | "files";
 
 const TABS: { id: Tab; icon: string }[] = [
   { id: "overview", icon: "📊" },
@@ -22,7 +22,14 @@ const TABS: { id: Tab; icon: string }[] = [
   { id: "rems", icon: "⏰" },
   { id: "mem", icon: "🧠" },
   { id: "chat", icon: "💬" },
+  { id: "files", icon: "📁" },
 ];
+
+const FILE_BUCKET = "user-files";
+const MAX_FILE = 50 * 1024 * 1024; // Supabase free max
+const QUOTA = 1024 * 1024 * 1024; // 1 GB free
+
+type WFile = { name: string; size: number; created: string };
 
 function relTime(iso: string): string {
   const diff = new Date(iso).getTime() - Date.now();
@@ -70,6 +77,17 @@ export default function Dashboard() {
   const [chatSending, setChatSending] = useState(false);
   // mirror toggle
   const [mirror, setMirror] = useState(true);
+  // #files
+  const [files, setFiles] = useState<WFile[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [upPct, setUpPct] = useState(0);
+  const [upErr, setUpErr] = useState("");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (tab === "files") loadFiles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
   const chatBoxRef = useRef<HTMLDivElement | null>(null);
   const chatInputRef = useRef<HTMLInputElement | null>(null);
   const stickBottom = useRef(true);
@@ -399,6 +417,109 @@ export default function Dashboard() {
     } catch {
       setMirror(!next); // wapas
       flash("Toggle fail — fir try karo");
+    }
+  }
+
+  function fmtSize(b: number): string {
+    if (!b) return "—";
+    if (b < 1024) return `${b} B`;
+    if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+    return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function displayName(name: string): string {
+    return name.replace(/^\d+-/, "");
+  }
+
+  function fileIcon(name: string): string {
+    const ext = name.split(".").pop()?.toLowerCase() || "";
+    if (["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext)) return "🖼";
+    if (["mp4", "mov", "webm", "mkv"].includes(ext)) return "🎬";
+    if (["mp3", "wav", "ogg", "m4a"].includes(ext)) return "🎵";
+    if (["pdf"].includes(ext)) return "📕";
+    if (["zip", "rar", "tar", "gz", "7z"].includes(ext)) return "📦";
+    if (["doc", "docx", "txt", "md"].includes(ext)) return "📄";
+    return "📎";
+  }
+
+  async function loadFiles() {
+    try {
+      const sb = supabaseBrowser();
+      const uid = await myUserId();
+      const { data, error } = await sb.storage.from(FILE_BUCKET).list(uid, { limit: 100, sortBy: { column: "created_at", order: "desc" } });
+      if (error) throw error;
+      setFiles(
+        ((data as any[]) || [])
+          .filter((f) => f.name !== ".emptyFolderPlaceholder")
+          .map((f) => ({ name: f.name, size: (f.metadata as any)?.size || 0, created: (f as any).created_at || "" }))
+      );
+    } catch {
+      setFiles([]); // bucket bana hi nahi ho to khaali
+    }
+  }
+
+  async function uploadFile() {
+    const f = fileInputRef.current?.files?.[0];
+    if (!f || uploading) return;
+    if (f.size > MAX_FILE) { setUpErr("50MB se badi file nahi jayegi"); return; }
+    setUploading(true);
+    setUpPct(0);
+    setUpErr("");
+    try {
+      const sb = supabaseBrowser();
+      const uid = await myUserId();
+      const safe = f.name.replace(/[^\w.\-]+/g, "_").slice(0, 120) || "file";
+      const path = `${uid}/${Date.now()}-${safe}`;
+      const { data, error } = await sb.storage.from(FILE_BUCKET).createSignedUploadUrl(path);
+      if (error || !data?.signedUrl) throw error || new Error("signed url nahi bana");
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("PUT", data.signedUrl);
+        xhr.setRequestHeader("Content-Type", f.type || "application/octet-stream");
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) setUpPct(Math.round((e.loaded / e.total) * 100));
+        };
+        xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error("upload fail " + xhr.status)));
+        xhr.onerror = () => reject(new Error("network fail"));
+        xhr.send(f);
+      });
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      flash("📁 Upload ho gaya!");
+      await loadFiles();
+    } catch (e: any) {
+      setUpErr(e.message || "Upload fail");
+    }
+    setUploading(false);
+  }
+
+  async function downloadFile(name: string) {
+    try {
+      const sb = supabaseBrowser();
+      const uid = await myUserId();
+      const { data, error } = await sb.storage.from(FILE_BUCKET).createSignedUrl(`${uid}/${name}`, 3600);
+      if (error || !data?.signedUrl) throw error || new Error("link nahi bana");
+      const a = document.createElement("a");
+      a.href = data.signedUrl;
+      a.download = displayName(name);
+      a.target = "_blank";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch {
+      flash("Download link nahi bana — fir try karo");
+    }
+  }
+
+  async function deleteFile(name: string) {
+    if (!window.confirm(`"${displayName(name)}" delete karo?`)) return;
+    try {
+      const uid = await myUserId();
+      const { error } = await supabaseBrowser().storage.from(FILE_BUCKET).remove([`${uid}/${name}`]);
+      if (error) throw error;
+      flash("🗑 Delete ho gaya");
+      await loadFiles();
+    } catch {
+      flash("Delete fail — fir try karo");
     }
   }
 
@@ -805,6 +926,50 @@ export default function Dashboard() {
                   </div>
                 </div>
               </div>
+            </>
+          )}
+
+          {tab === "files" && (
+            <>
+              <div className="page-head">
+                <h1>{tr(lang, "fi.title")}</h1>
+                <p>{tr(lang, "fi.sub")}</p>
+              </div>
+              <div className="card">
+                <h2>📤 {tr(lang, "fi.pick")} <span className="muted">(max 50MB)</span></h2>
+                <div className="row" style={{ marginTop: 12 }}>
+                  <input ref={fileInputRef} type="file" onChange={() => { setUpErr(""); setUpPct(0); }} disabled={uploading} />
+                  <button onClick={uploadFile} disabled={uploading}>{uploading ? `${tr(lang, "fi.uploading")} ${upPct}%` : tr(lang, "fi.upload")}</button>
+                </div>
+                {uploading && <div className="progress"><div style={{ width: `${upPct}%` }} /></div>}
+                {upErr && <p className="err" style={{ marginTop: 10 }}>{upErr}</p>}
+              </div>
+              <div className="card">
+                <h2>💾 Storage</h2>
+                <p className="desc">{fmtSize(files.reduce((a, f) => a + f.size, 0))} / 1 GB {tr(lang, "fi.used")}</p>
+                <div className={`meter${files.reduce((a, f) => a + f.size, 0) > QUOTA * 0.8 ? " hot" : ""}`}>
+                  <div style={{ width: `${Math.min(100, Math.round((files.reduce((a, f) => a + f.size, 0) / QUOTA) * 100))}%` }} />
+                </div>
+              </div>
+              {files.length === 0 ? (
+                <EmptyState icon="📁" title={tr(lang, "fi.emptyT")}>{tr(lang, "fi.emptyD")}</EmptyState>
+              ) : (
+                <ul className="list">
+                  {files.map((f) => (
+                    <li key={f.name}>
+                      <div className="li-head file-row">
+                        <span className="file-icon">{fileIcon(f.name)}</span>
+                        <b>{displayName(f.name)}</b>
+                        <span className="file-actions">
+                          <a href="#" onClick={(e) => { e.preventDefault(); downloadFile(f.name); }}>{tr(lang, "fi.download")}</a>
+                          <a href="#" className="link-danger" onClick={(e) => { e.preventDefault(); deleteFile(f.name); }}>{tr(lang, "fi.delete")}</a>
+                        </span>
+                      </div>
+                      <small>{fmtSize(f.size)}{f.created ? ` · ${new Date(f.created).toLocaleString("en-IN")}` : ""}</small>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </>
           )}
         </main>
