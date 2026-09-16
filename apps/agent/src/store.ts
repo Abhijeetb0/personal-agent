@@ -97,3 +97,23 @@ export async function setOwnerNumber(userId: string, ownerNumber: string) {
   if (error) throw error;
   return clean;
 }
+
+// Web-chat mirror toggle — default ON (column na ho ya row na ho to bhi on, purane users safe)
+export async function getWebMirror(userId: string): Promise<boolean> {
+  if (sbAdmin) {
+    try {
+      const { data } = await sbAdmin.from("UserSetting").select("web_mirror").eq("user_id", userId).single();
+      if (data && typeof (data as any).web_mirror === "boolean") return (data as any).web_mirror;
+    } catch (e) {
+      logger.error({ err: e }, "[store] getMirror fail, default on");
+    }
+  }
+  return true;
+}
+
+export async function setWebMirror(userId: string, on: boolean): Promise<boolean> {
+  if (!sbAdmin) throw new Error("DB nahi hai");
+  const { error } = await sbAdmin.from("UserSetting").upsert({ user_id: userId, web_mirror: !!on }, { onConflict: "user_id" });
+  if (error) throw error;
+  return !!on;
+}

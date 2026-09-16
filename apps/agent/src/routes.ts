@@ -6,6 +6,7 @@ import {
   getSession, ensureSession, sendWhatsAppMessage, resetSession, requestPairingCode,
 } from "./baileys.js";
 import { setOwnerNumber, getOwnerNumber } from "./store.js";
+import { getWebMirror, setWebMirror } from "./store.js";
 import { normalize } from "./whitelist.js";
 import { nextLeetCodeContest, formatIST, allLeetCodeContests, upcomingContests, pastContests } from "./leetcode.js";
 import { generalLimiter, sensitiveLimiter, sendLimiter, chatLimiter } from "./rateLimit.js";
@@ -131,6 +132,20 @@ export function buildRoutes() {
       const clean = await setOwnerNumber(uid, String((req.body as any)?.ownerNumber || ""));
       getSession(uid).ownerNumber = clean;
       res.json({ ok: true, ownerNumber: clean });
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+
+  // Web-chat mirror toggle: web wale jawab WhatsApp pe bhi jayen ya nahi
+  app.get("/mirror", auth, async (req, res) => {
+    res.json({ mirror: await getWebMirror(needUser(req)) });
+  });
+
+  app.post("/mirror", auth, async (req, res) => {
+    try {
+      const on = await setWebMirror(needUser(req), !!((req.body as any)?.on));
+      res.json({ ok: true, mirror: on });
     } catch (e) {
       res.status(400).json({ error: (e as Error).message });
     }

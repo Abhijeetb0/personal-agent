@@ -68,6 +68,8 @@ export default function Dashboard() {
   // #3 web chat composer
   const [chatInput, setChatInput] = useState("");
   const [chatSending, setChatSending] = useState(false);
+  // mirror toggle
+  const [mirror, setMirror] = useState(true);
   const chatBoxRef = useRef<HTMLDivElement | null>(null);
   const chatInputRef = useRef<HTMLInputElement | null>(null);
   const stickBottom = useRef(true);
@@ -161,6 +163,11 @@ export default function Dashboard() {
       if (l.ok) setContest((await l.json()).contest);
       const cl = await fetch("/api/agent-contests");
       if (cl.ok) setContests(await cl.json());
+      const mi = await fetch("/api/agent-mirror");
+      if (mi.ok) {
+        const mj = await mi.json();
+        if (typeof mj.mirror === "boolean") setMirror(mj.mirror);
+      }
     } catch {}
     try {
       const sb = supabaseBrowser();
@@ -375,6 +382,24 @@ export default function Dashboard() {
     }
     setChatSending(false);
     chatInputRef.current?.focus(); // lagatar type kar sako — cursor wapas
+  }
+
+  async function toggleMirror() {
+    const next = !mirror;
+    setMirror(next); // optimistic
+    try {
+      const r = await fetch("/api/agent-mirror", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ on: next }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || "fail");
+      setMirror(!!j.mirror);
+      flash(next ? "🪞 Mirror on — jawab WhatsApp pe bhi jayega!" : "🪞 Mirror off — jawab sirf web pe.");
+    } catch {
+      setMirror(!next); // wapas
+      flash("Toggle fail — fir try karo");
+    }
   }
 
   // ---- derived state ----
@@ -594,6 +619,15 @@ export default function Dashboard() {
                 {testMsg && <p className={testMsg.startsWith("Bhej diya") ? "ok-text" : testMsg === "bhej rahe..." ? "muted" : "err"} style={{ marginTop: 10 }}>{testMsg === "bhej rahe..." ? "⏳ " + testMsg : testMsg}</p>}
                 {!owner.trim() && <p className="muted">Pehle upar owner number save karo.</p>}
               </div>
+
+              <div className="card">
+                <h2>🪞 {tr(lang, "mirror.title")}</h2>
+                <p className="desc">{tr(lang, "mirror.desc")}</p>
+                <div className="switch-row">
+                  <button className={`switch${mirror ? " on" : ""}`} onClick={toggleMirror} aria-label="mirror toggle" />
+                  <b>{mirror ? tr(lang, "mirror.on") : tr(lang, "mirror.off")}</b>
+                </div>
+              </div>
             </>
           )}
 
@@ -739,7 +773,7 @@ export default function Dashboard() {
             <>
               <div className="page-head">
                 <h1>{tr(lang, "ch.title")}</h1>
-                <p>{tr(lang, "ch.sub")}</p>
+                <p>{tr(lang, "ch.sub")} {mirror ? tr(lang, "ch.mirrorOn") : tr(lang, "ch.mirrorOff")}</p>
               </div>
               <div className="chat-shell">
                 <div className="card">
