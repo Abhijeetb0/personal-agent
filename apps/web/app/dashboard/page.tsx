@@ -496,12 +496,12 @@ export default function Dashboard() {
     try {
       const sb = supabaseBrowser();
       const uid = await myUserId();
-      const { data, error } = await sb.storage.from(FILE_BUCKET).createSignedUrl(`${uid}/${name}`, 3600);
+      const original = displayName(name);
+      const { data, error } = await sb.storage.from(FILE_BUCKET).createSignedUrl(`${uid}/${name}`, 3600, { download: original });
       if (error || !data?.signedUrl) throw error || new Error("link nahi bana");
       const a = document.createElement("a");
       a.href = data.signedUrl;
-      a.download = displayName(name);
-      a.target = "_blank";
+      a.download = original;
       document.body.appendChild(a);
       a.click();
       a.remove();
