@@ -28,6 +28,9 @@ export interface UserSession {
   lastClose: { code: unknown; detail: string; at: number } | null;
   generation: number;
   ownerNumber: string;
+  // Self-heal: exponential backoff state (Render sleep / WA idle drop se bachne ke liye)
+  reconnectAttempts: number;
+  nextRetryAt: number;
 }
 
 const sessions = new Map<string, UserSession>();
@@ -39,6 +42,7 @@ export function getSession(userId: string): UserSession {
       userId, sock: null, status: "disconnected",
       lastQr: null, lastQrAt: 0, pairingCode: null, pairingCodeAt: 0,
       lastClose: null, generation: 0, ownerNumber: "",
+      reconnectAttempts: 0, nextRetryAt: 0,
     };
     sessions.set(userId, s);
   }
@@ -53,13 +57,35 @@ function authDir(userId: string): string {
   return path.join(AUTH_ROOT, userId);
 }
 
+// Reconnect backoff: 5s -> 30s -> 2min -> 10min cap (WhatsApp ban-risk se bachne ke liye spam nahi)
+export const RECONNECT_DELAYS = [5_000, 30_000, 120_000, 600_000];
+
+export function computeReconnectDelay(attempt: number): number {
+  if (attempt <= 0) return RECONNECT_DELAYS[0]!;
+  const idx = Math.min(attempt - 1, RECONNECT_DELAYS.length - 1);
+  return RECONNECT_DELAYS[idx]!;
+}
+
+// Baileys version: har connect pe fetch mat karo (cold-start slow + fail point) — 1 hr cache
+let cachedVersion: Awaited<ReturnType<typeof fetchLatestBaileysVersion>>["version"] | null = null;
+let cachedVersionAt = 0;
+const VERSION_TTL_MS = 60 * 60 * 1000;
+
+async function getBaileysVersion() {
+  if (cachedVersion && Date.now() - cachedVersionAt < VERSION_TTL_MS) return cachedVersion;
+  const { version } = await fetchLatestBaileysVersion();
+  cachedVersion = version;
+  cachedVersionAt = Date.now();
+  return version;
+}
+
 export async function startWhatsApp(userId: string) {
   const s = getSession(userId);
   const myGen = ++s.generation;
   s.ownerNumber = await getOwnerNumber(userId);
   await restoreAuthFromSupabase(userId, authDir(userId));
   const { state: authState, saveCreds } = await useMultiFileAuthState(authDir(userId));
-  const { version } = await fetchLatestBaileysVersion();
+  const version = await getBaileysVersion();
 
   const sock = makeWASocket({
     version,
@@ -89,6 +115,9 @@ export async function startWhatsApp(userId: string) {
     if (connection === "open") {
       s.status = "connected";
       s.lastQr = null;
+      // Success: backoff reset (agla drop phir 5s se shuru hoga)
+      s.reconnectAttempts = 0;
+      s.nextRetryAt = 0;
       logger.info({ userId: userId.slice(0, 8) }, "[wa] Connected!");
       await setStatus(userId, "connected");
       await saveAuthToSupabase(userId, authDir(userId), "connected");
@@ -103,11 +132,17 @@ export async function startWhatsApp(userId: string) {
       s.lastClose = { code, detail: String(err?.message || err || ""), at: Date.now() };
       await setStatus(userId, "disconnected");
       if (!loggedOut) {
-        logger.info({ userId: userId.slice(0, 8) }, "[wa] 5 sec me reconnect...");
+        s.reconnectAttempts += 1;
+        const delay = computeReconnectDelay(s.reconnectAttempts);
+        s.nextRetryAt = Date.now() + delay;
+        logger.info({ userId: userId.slice(0, 8), attempt: s.reconnectAttempts, delayMs: delay }, "[wa] backoff reconnect scheduled...");
         setTimeout(() => {
           if (myGen === s.generation) startWhatsApp(userId).catch((e) => logger.error({ err: e }, "[wa] reconnect fail"));
-        }, 5000);
+        }, delay);
       } else {
+        // Logged out: retry bekar hai (QR hi chahiye) — watchdog bhi skip karega
+        s.reconnectAttempts = 0;
+        s.nextRetryAt = 0;
         logger.info({ userId: userId.slice(0, 8) }, "[wa] Logged out — dashboard se 'Naya QR' dabao");
       }
     }
@@ -171,6 +206,9 @@ export async function resetSession(userId: string) {
   s.status = "disconnected";
   s.lastQr = null;
   s.pairingCode = null;
+  s.reconnectAttempts = 0;
+  s.nextRetryAt = 0;
+  s.lastClose = null;
   await fs.rm(authDir(userId), { recursive: true, force: true }).catch(() => {});
   await clearSupabaseSession(userId);
   logger.info({ userId: userId.slice(0, 8) }, "[wa] session reset — fresh QR ban raha hai...");
@@ -194,6 +232,10 @@ export async function startAllSessions() {
 
 const starting = new Set<string>();
 
+export function isStarting(userId: string): boolean {
+  return starting.has(userId);
+}
+
 // Session lazy-start (pehli API call pe) — duplicate socket nahi banega
 export function ensureSession(userId: string) {
   const s = getSession(userId);
@@ -202,4 +244,24 @@ export function ensureSession(userId: string) {
   startWhatsApp(userId)
     .catch((e) => logger.error({ userId: userId.slice(0, 8), err: e }, "[agent] session start fail"))
     .finally(() => starting.delete(userId));
+}
+
+// Watchdog / scheduler ke liye: dead session ko backoff respect karke jagao.
+// - connected pe kuch nahi, starting pe kuch nahi (duplicate socket rokna hai)
+// - loggedOut (401) pe kabhi auto-retry nahi (QR hi chahiye)
+// - force=false to nextRetryAt ka wait karo (close-handler ka timer + watchdog double-retry na kare)
+// Returns true = reconnect shuru kiya, false = skip.
+export function requestReconnect(userId: string, opts: { force?: boolean; reason?: string } = {}): boolean {
+  const s = getSession(userId);
+  if (s.status === "connected") return false;
+  if (starting.has(userId)) return false;
+  const loggedOut = (s.lastClose?.code as number) === DisconnectReason.loggedOut;
+  if (loggedOut) return false;
+  if (!opts.force && s.nextRetryAt && Date.now() < s.nextRetryAt) return false;
+  starting.add(userId);
+  logger.info({ userId: userId.slice(0, 8), reason: opts.reason || "watchdog" }, "[wa] reconnect trigger");
+  startWhatsApp(userId)
+    .catch((e) => logger.error({ userId: userId.slice(0, 8), err: e }, "[wa] triggered reconnect fail"))
+    .finally(() => starting.delete(userId));
+  return true;
 }

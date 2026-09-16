@@ -46,12 +46,16 @@ export function buildRoutes() {
 
   app.get("/status", auth, (req, res) => {
     const s = getSession(needUser(req));
+    const reconnectInSec = s.nextRetryAt ? Math.max(0, Math.round((s.nextRetryAt - Date.now()) / 1000)) : null;
     res.json({
       status: s.status,
       connected: s.status === "connected",
       wsOpen: (s.sock as any)?.ws?.readyState === 1,
       lastClose: s.lastClose,
       ownerNumber: s.ownerNumber || null,
+      // Dashboard waking UI ke liye: retry kab hoga + kitni baar fail hua
+      reconnectAttempts: s.reconnectAttempts || 0,
+      reconnectInSec,
     });
   });
 

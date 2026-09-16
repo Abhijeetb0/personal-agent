@@ -1,7 +1,7 @@
 import cron from "node-cron";
 import logger from "./logger.js";
 import { sbAdmin } from "./sb.js";
-import { sendWhatsAppMessage, allSessions } from "./baileys.js";
+import { sendWhatsAppMessage, allSessions, requestReconnect } from "./baileys.js";
 import { getOwnerNumber } from "./store.js";
 
 // Har minute: har connected user ke due reminders bhejo.
@@ -25,7 +25,10 @@ export function startScheduler() {
       for (const r of due) {
         const s = live.get(r.user_id);
         if (!s) {
-          logger.info({ id: r.id }, "[cron] skip: user session connected nahi");
+          // Session dead hai par reminder due hai — agle minute bhejne ke liye jagao,
+          // is tick me skip (sent=false rehta hai, miss nahi hoga).
+          requestReconnect(r.user_id, { reason: "scheduler-due" });
+          logger.info({ id: r.id }, "[cron] skip: user session connected nahi — reconnect trigger");
           continue;
         }
         // owner boot ke baad set hua ho to fresh uthao

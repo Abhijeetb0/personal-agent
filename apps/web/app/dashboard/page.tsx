@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { supabaseBrowser } from "../../lib/supabase-browser";
 
-type Status = { status: string; connected: boolean; ownerNumber: string | null };
+type Status = { status: string; connected: boolean; ownerNumber: string | null; reconnectAttempts?: number; reconnectInSec?: number | null; lastClose?: { code: unknown; detail: string; at: number } | null };
 type Qr = { status: string; dataUrl: string | null };
 type Reminder = { id: string; title: string; remind_at: string; sent: boolean; source: string };
 type Memory = { id: string; fact: string };
@@ -117,10 +117,16 @@ export default function Dashboard() {
     load();
   }
 
+  const isLoggedOut = (status?.lastClose as any)?.code === 401;
+  const retrySec = status?.reconnectInSec ?? null;
   const pill = status?.connected
     ? <span className="pill ok">● Connected</span>
     : status?.status === "qr"
     ? <span className="pill warn">● QR ready — scan karo</span>
+    : isLoggedOut
+    ? <span className="pill bad">● Logged out — “Naya QR lo” dabao</span>
+    : status && (status.reconnectAttempts || 0) > 0
+    ? <span className="pill warn">● Jag raha hai… {retrySec != null && retrySec > 0 ? `${retrySec}s me retry` : "retry lag raha hai"} (page khula rakho)</span>
     : <span className="pill bad">● {status?.status ?? "loading..."}</span>;
 
   return (
@@ -130,6 +136,9 @@ export default function Dashboard() {
         <button className="ghost" onClick={logout}>Logout</button>
       </div>
       <p>{pill}</p>
+      {!status?.connected && !isLoggedOut && status?.status !== "qr" && (
+        <p className="muted">Agent khud reconnect kar raha hai — 1-2 min me live ho jayega. Naya QR tabhi lo jab 10 min se zyada dead rahe.</p>
+      )}
 
       <div className="tabs">
         {(["connect", "rems", "mem", "chat"] as const).map((t) => (

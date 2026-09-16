@@ -4,6 +4,7 @@ import logger from "./logger.js";
 import { buildRoutes } from "./routes.js";
 import { startAllSessions } from "./baileys.js";
 import { startScheduler } from "./scheduler.js";
+import { startWatchdog } from "./watchdog.js";
 import { logAvailableModels } from "./groq.js";
 
 const PORT = Number(process.env.PORT || 3001);
@@ -18,3 +19,4 @@ startAllSessions().catch((e) => logger.error({ err: e }, "[agent] boot sessions 
 logAvailableModels().catch(() => {});
 
 startScheduler();
+startWatchdog();
