@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { supabaseBrowser } from "../../lib/supabase-browser";
+import { Brand, StatusPill, StatCard, EmptyState, SectionHeader, Skeleton, type ConnTone } from "../components/ui";
 
 type Status = { status: string; connected: boolean; ownerNumber: string | null; reconnectAttempts?: number; reconnectInSec?: number | null; lastClose?: { code: unknown; detail: string; at: number } | null };
 type Qr = { status: string; dataUrl: string | null };
@@ -9,8 +10,28 @@ type Memory = { id: string; fact: string };
 type Msg = { body: string; reply: string | null; created_at: string };
 type Contest = { name: string; startIST: string } | null;
 
+type Tab = "overview" | "connect" | "rems" | "mem" | "chat";
+
+const TABS: { id: Tab; label: string; icon: string }[] = [
+  { id: "overview", label: "Overview", icon: "📊" },
+  { id: "connect", label: "Connect", icon: "🔗" },
+  { id: "rems", label: "Reminders", icon: "⏰" },
+  { id: "mem", label: "Memory", icon: "🧠" },
+  { id: "chat", label: "Chat", icon: "💬" },
+];
+
+function relTime(iso: string): string {
+  const diff = new Date(iso).getTime() - Date.now();
+  const abs = Math.abs(diff);
+  const m = Math.round(abs / 60000);
+  const h = Math.round(abs / 3600000);
+  const d = Math.round(abs / 86400000);
+  const s = d > 0 ? `${d} din` : h > 0 ? `${h} ghante` : m > 0 ? `${m} min` : "abhi";
+  return diff >= 0 ? `${s} me` : `${s} pehle`;
+}
+
 export default function Dashboard() {
-  const [tab, setTab] = useState<"connect" | "rems" | "mem" | "chat">("connect");
+  const [tab, setTab] = useState<Tab>("overview");
   const [status, setStatus] = useState<Status | null>(null);
   const [qr, setQr] = useState<Qr | null>(null);
   const [owner, setOwner] = useState("");
@@ -26,6 +47,7 @@ export default function Dashboard() {
   const [contest, setContest] = useState<Contest>(null);
   const [testText, setTestText] = useState("Hello! Agent test");
   const [testMsg, setTestMsg] = useState("");
+  const [email, setEmail] = useState("");
 
   async function load() {
     try {
@@ -53,10 +75,20 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    supabaseBrowser().auth.getSession().then(({ data }) => {
+    let sb;
+    try {
+      sb = supabaseBrowser();
+    } catch {
+      window.location.href = "/login";
+      return;
+    }
+    sb.auth.getSession().then(({ data }) => {
       if (!data.session) window.location.href = "/login";
-      else load();
-    });
+      else {
+        setEmail(data.session.user.email || "");
+        load();
+      }
+    }).catch(() => { window.location.href = "/login"; });
     const t = setInterval(load, 8000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -117,133 +149,293 @@ export default function Dashboard() {
     load();
   }
 
+  // ---- derived state ----
+  const connected = !!status?.connected;
+  const isQr = status?.status === "qr";
   const isLoggedOut = (status?.lastClose as any)?.code === 401;
   const retrySec = status?.reconnectInSec ?? null;
-  const pill = status?.connected
-    ? <span className="pill ok">● Connected</span>
-    : status?.status === "qr"
-    ? <span className="pill warn">● QR ready — scan karo</span>
-    : isLoggedOut
-    ? <span className="pill bad">● Logged out — “Naya QR lo” dabao</span>
-    : status && (status.reconnectAttempts || 0) > 0
-    ? <span className="pill warn">● Jag raha hai… {retrySec != null && retrySec > 0 ? `${retrySec}s me retry` : "retry lag raha hai"} (page khula rakho)</span>
-    : <span className="pill bad">● {status?.status ?? "loading..."}</span>;
+  const ownerSet = !!(status?.ownerNumber || owner);
+  const everChatted = chat.length > 0;
+  const pending = rems.filter((r) => !r.sent);
+  const todayChats = chat.filter((m) => new Date(m.created_at).toDateString() === new Date().toDateString()).length;
+
+  let tone: ConnTone = "neutral";
+  let statusText = "Loading...";
+  if (connected) { tone = "ok"; statusText = "Connected"; }
+  else if (isQr) { tone = "wait"; statusText = "QR ready — scan karo"; }
+  else if (isLoggedOut) { tone = "bad"; statusText = "Logged out — Naya QR lo"; }
+  else if (status && (status.reconnectAttempts || 0) > 0) {
+    tone = "wait";
+    statusText = `Jag raha hai… ${retrySec != null && retrySec > 0 ? `${retrySec}s me retry` : "retry lag raha hai"}`;
+  } else if (status) { tone = "bad"; statusText = status.status; }
+
+  const setup = [
+    { done: ownerSet, title: "Owner number save karo", desc: "Jis number se tum agent se baat karoge — agent SIRF isi ko reply karega.", go: "connect" as Tab, btn: "Set karo →" },
+    { done: connected, title: "WhatsApp link karo", desc: "QR scan ya pairing code se agent wala number link karo.", go: "connect" as Tab, btn: "Link karo →" },
+    { done: everChatted, title: "Pehla message bhejo", desc: "Owner number se agent ko hi bhejo — turant reply ayega.", go: "chat" as Tab, btn: "Chat dekho →" },
+  ];
+  const setupDone = setup.filter((s) => s.done).length;
+
+  const nav = (cls: string, itemCls: (t: Tab) => string) => (
+    <>
+      {TABS.map((t) => (
+        <button key={t.id} className={itemCls(t.id)} onClick={() => setTab(t.id)}>
+          <span>{t.icon}</span> {t.label}
+          {t.id === "rems" && pending.length > 0 && <span className="count-badge">{pending.length}</span>}
+          {t.id === "mem" && mems.length > 0 && <span className="count-badge">{mems.length}</span>}
+        </button>
+      ))}
+    </>
+  );
 
   return (
-    <main className="wrap">
-      <div className="topbar">
-        <h1>Personal <span>Agent</span></h1>
-        <button className="ghost" onClick={logout}>Logout</button>
-      </div>
-      <p>{pill}</p>
-      {!status?.connected && !isLoggedOut && status?.status !== "qr" && (
-        <p className="muted">Agent khud reconnect kar raha hai — 1-2 min me live ho jayega. Naya QR tabhi lo jab 10 min se zyada dead rahe.</p>
-      )}
+    <>
+      <nav className="nav">
+        <div className="nav-inner">
+          <span className="brand"><Brand sub="Dashboard" /></span>
+          <div className="nav-links">
+            <StatusPill tone={tone}>{statusText}</StatusPill>
+          </div>
+        </div>
+      </nav>
 
-      <div className="tabs">
-        {(["connect", "rems", "mem", "chat"] as const).map((t) => (
-          <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
-            {t === "connect" ? "🔗 Connect" : t === "rems" ? `⏰ Reminders (${rems.filter((r) => !r.sent).length})` : t === "mem" ? `🧠 Memory (${mems.length})` : "💬 Chat"}
-          </button>
-        ))}
+      <div className="topbar-mobile">
+        <div className="tabs-row">
+          {nav("", (t) => `side-item${tab === t ? " active" : ""}`)}
+        </div>
       </div>
 
-      {tab === "connect" && (
-        <>
-          <div className="card">
-            <h2>1. Owner number (tumhara number)</h2>
-            <p className="desc">Jis number se tum agent se baat karoge — agent SIRF isi ko reply karega.</p>
-            <div className="row">
-              <input value={owner} onChange={(e) => setOwner(e.currentTarget.value)} placeholder="91XXXXXXXXXX" style={{ flex: 1, minWidth: 180, marginBottom: 0 }} />
-              <button onClick={saveOwner}>Save</button>
+      <div className="dash">
+        <aside className="sidebar">
+          <div className="side-user">
+            <span className="avatar">{(email || "?").slice(0, 1).toUpperCase()}</span>
+            <div style={{ minWidth: 0 }}>
+              <b>{email || "…"}</b>
+              <span>{connected ? "● online" : "○ offline"}</span>
             </div>
-            {ownerMsg && <p className="muted">{ownerMsg}</p>}
           </div>
-
-          <div className="card">
-            <h2>2. WhatsApp link karo (agent wala number)</h2>
-            <p className="desc">Agent wale phone me: WhatsApp → ⋮ → Linked Devices → Link a Device.</p>
-            {qr?.dataUrl ? (
-              <div className="qr"><img src={qr.dataUrl} alt="QR" width={240} height={240} /></div>
-            ) : status?.connected ? (
-              <p className="ok-text">✅ Connected hai — owner number se message karke test karo.</p>
-            ) : (
-              <p className="muted">QR ka wait... agent chal raha hona chahiye.</p>
-            )}
-            <p style={{ marginTop: 12 }}>
-              <button className="ghost" onClick={newQr} disabled={busy}>{busy ? "Ban raha..." : "Naya QR lo"}</button>
-            </p>
+          {nav("side-nav", (t) => `side-item${tab === t ? " active" : ""}`)}
+          <div className="side-foot">
+            <button className="side-item side-logout" onClick={logout}>↩ Logout</button>
           </div>
+        </aside>
 
-          <div className="card">
-            <h2>QR na chale to — Code se link karo</h2>
-            <p className="desc">Number dalo → code lo → us phone me Linked Devices → “Link with phone number instead” me 1-2 min me type karo.</p>
-            <input value={agentNum} onChange={(e) => setAgentNum(e.currentTarget.value)} placeholder="91XXXXXXXXXX (agent SIM)" inputMode="numeric" />
-            <button onClick={getPairCode} disabled={busy}>{busy ? "..." : "Pairing code lo"}</button>
-            {pairCode && (<><p className="code">{pairCode}</p><p className="muted">Ye code <b>{pairNum}</b> ke liye hai — usi phone me type karo.</p></>)}
-            {pairErr && <p className="err">{pairErr}</p>}
-          </div>
-
-          <div className="card">
-            <h2>Next LeetCode Contest</h2>
-            {contest ? <p>{contest.name} — <b>{contest.startIST}</b> IST</p> : <p className="muted">Load...</p>}
-            <p className="desc">WhatsApp pe bolo: “leetcode contest se 30 min pehle remind kar”</p>
-          </div>
-
-          <div className="card">
-            <h2>Test message</h2>
-            <textarea value={testText} onChange={(e) => setTestText(e.currentTarget.value)} rows={2} />
-            <button onClick={sendTest}>Send</button>
-            {testMsg && <p className="muted">{testMsg}</p>}
-          </div>
-        </>
-      )}
-
-      {tab === "rems" && (
-        <div className="card">
-          <h2>Reminders</h2>
-          <p className="desc">WhatsApp se banao (“10 min me yaad dila”), yaha dekho/hatayo.</p>
-          {rems.length === 0 ? <p className="muted">Koi reminder nahi.</p> : (
-            <ul className="list">
-              {rems.map((r) => (
-                <li key={r.id}>
-                  {r.sent ? "✅ " : "⏰ "}{r.title}
-                  <br /><small>{new Date(r.remind_at).toLocaleString("en-IN")} · {r.source}</small>
-                  {!r.sent && <> <a href="#" onClick={(e) => { e.preventDefault(); delRem(r.id); }}>hatayo</a></>}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-
-      {tab === "mem" && (
-        <div className="card">
-          <h2>Long-term Memory</h2>
-          <p className="desc">WhatsApp pe “yaad rakhna...” bola to yaha save hota hai.</p>
-          {mems.length === 0 ? <p className="muted">Abhi kuch yaad nahi.</p> : (
-            <ul className="list">
-              {mems.map((m) => (
-                <li key={m.id}>🧠 {m.fact} <a href="#" onClick={(e) => { e.preventDefault(); delMem(m.id); }}>bhool jao</a></li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-
-      {tab === "chat" && (
-        <div className="card">
-          <h2>Recent Chat</h2>
-          <div className="chat">
-            {chat.length === 0 ? <p className="muted">Abhi koi baat nahi hui.</p> : chat.map((m, i) => (
-              <div key={i}>
-                <div className="bubble u">{m.body}</div>
-                {m.reply && <div className="bubble a">{m.reply}</div>}
+        <main className="dash-main">
+          {tab === "overview" && (
+            <>
+              <div className="page-head">
+                <h1>Overview 👋</h1>
+                <p>Tumhare agent ka live haal — ek nazar me.</p>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </main>
+
+              <div className={`status-hero${connected ? "" : isQr || tone === "wait" ? " wait" : " dead"}`}>
+                <span className={`status-dot${connected ? " ok" : tone === "wait" || isQr ? " wait" : " bad"}`} />
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <h2>{connected ? "Agent live hai ✅" : isQr ? "QR ready — scan karo 📷" : isLoggedOut ? "Logged out hai 🔌" : "Agent jag raha hai ⏳"}</h2>
+                  <p>
+                    {connected
+                      ? `Owner number ${status?.ownerNumber || owner || "—"} se message karke test karo.`
+                      : isLoggedOut
+                      ? "Connect tab me “Naya QR lo” dabao aur dobara link karo."
+                      : "1–2 min me live ho jayega. Page khula rakho — Naya QR tabhi lo jab 10 min se zyada dead rahe."}
+                  </p>
+                </div>
+                {!connected && <button className="ghost sm" onClick={() => setTab("connect")}>Connect →</button>}
+              </div>
+
+              <SectionHeader title="Setup progress" right={`${setupDone}/3 complete`} />
+              <div className="setup-steps">
+                {setup.map((s, i) => (
+                  <div key={i} className={`setup-step${s.done ? " done" : ""}`}>
+                    <span className="setup-check">{s.done ? "✓" : i + 1}</span>
+                    <div style={{ flex: 1 }}>
+                      <b>{s.title}</b>
+                      <p>{s.desc}</p>
+                      {!s.done && <button className="ghost sm" onClick={() => setTab(s.go)}>{s.btn}</button>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <SectionHeader title="Stats" right="live" />
+              <div className="stat-grid">
+                <StatCard label="⏰ Pending" value={String(pending.length)} hint="reminders" />
+                <StatCard label="🧠 Memories" value={String(mems.length)} hint="yaad hai" />
+                <StatCard label="💬 Aaj ki chat" value={String(todayChats)} hint="messages" />
+                <StatCard label="🏆 Contest" value={contest ? "✓" : "…"} hint={contest ? contest.name.slice(0, 18) : "load..."} />
+              </div>
+
+              {contest && (
+                <div className="card">
+                  <h2>🏆 Next LeetCode Contest</h2>
+                  <p className="desc">{contest.name} — <b style={{ color: "var(--accent-2)" }}>{contest.startIST}</b> IST</p>
+                  <p className="muted" style={{ margin: 0 }}>WhatsApp pe bolo: “contest se 30 min pehle remind kar”</p>
+                </div>
+              )}
+
+              <SectionHeader title="Recent activity" right={`${chat.length} chats`} />
+              {chat.length === 0 ? (
+                <EmptyState icon="💤" title="Abhi koi baat nahi hui">Owner number se <b>hi</b> bhejo — yahi pe dikhega.</EmptyState>
+              ) : (
+                <ul className="list">
+                  {chat.slice(-4).reverse().map((m, i) => (
+                    <li key={i}>
+                      <div className="li-head"><b>💬 {m.body.slice(0, 90)}</b></div>
+                      {m.reply && <small>→ {m.reply.slice(0, 110)}</small>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+
+          {tab === "connect" && (
+            <>
+              <div className="page-head">
+                <h1>Connect 🔗</h1>
+                <p>Owner number + WhatsApp linking — sab kuch yahi se.</p>
+              </div>
+
+              <div className="card">
+                <h2><span className="step-num">1</span> &nbsp;Owner number (tumhara number)</h2>
+                <p className="desc">Jis number se tum agent se baat karoge — agent SIRF isi ko reply karega.</p>
+                <div className="row">
+                  <input value={owner} onChange={(e) => setOwner(e.currentTarget.value)} placeholder="91XXXXXXXXXX" />
+                  <button onClick={saveOwner}>Save</button>
+                </div>
+                {ownerMsg && <p className={ownerMsg.startsWith("Saved") ? "ok-text" : "muted"}>{ownerMsg}</p>}
+              </div>
+
+              <div className="card">
+                <h2><span className="step-num">2</span> &nbsp;WhatsApp link karo (agent wala number)</h2>
+                <p className="desc">Agent wale phone me: WhatsApp → ⋮ → Linked Devices → Link a Device.</p>
+                <div className="qr-box">
+                  {qr?.dataUrl ? (
+                    <div className="qr"><img src={qr.dataUrl} alt="QR" width={220} height={220} /></div>
+                  ) : connected ? (
+                    <p className="ok-text">✅ Connected hai — owner number se message karke test karo.</p>
+                  ) : (
+                    <div style={{ flex: 1, minWidth: 200 }}>
+                      <Skeleton h={220} w="220px" />
+                      <p className="muted" style={{ marginTop: 10 }}>QR aa raha hai… agent jag raha hoga to 1 min lagega.</p>
+                    </div>
+                  )}
+                  <div style={{ flex: 1, minWidth: 200 }}>
+                    <StatusPill tone={tone}>{statusText}</StatusPill>
+                    <p style={{ marginTop: 12 }}>
+                      <button className="ghost sm" onClick={newQr} disabled={busy}>{busy ? "Ban raha..." : "🔄 Naya QR lo"}</button>
+                    </p>
+                    <p className="muted">Aadha-fasa lage to hi Naya QR dabao — warna auto-reconnect ka wait karo.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="card">
+                <h2>QR na chale to — code se link karo</h2>
+                <p className="desc">Number dalo → code lo → us phone me Linked Devices → “Link with phone number instead” me 1–2 min me type karo.</p>
+                <div className="row">
+                  <input value={agentNum} onChange={(e) => setAgentNum(e.currentTarget.value)} placeholder="91XXXXXXXXXX (agent SIM)" inputMode="numeric" />
+                  <button onClick={getPairCode} disabled={busy}>{busy ? "..." : "Pairing code lo"}</button>
+                </div>
+                {pairCode && (<><p className="code">{pairCode}</p><p className="muted">Ye code <b>{pairNum}</b> ke liye hai — usi phone me type karo.</p></>)}
+                {pairErr && <p className="err">{pairErr}</p>}
+              </div>
+
+              <div className="card">
+                <h2>✉️ Test message</h2>
+                <p className="desc">Owner number pe agent se ek message bhej ke connection verify karo.</p>
+                <textarea value={testText} onChange={(e) => setTestText(e.currentTarget.value)} rows={2} />
+                <button onClick={sendTest}>Send test →</button>
+                {testMsg && <p className="muted">{testMsg}</p>}
+              </div>
+            </>
+          )}
+
+          {tab === "rems" && (
+            <>
+              <div className="page-head">
+                <h1>Reminders ⏰</h1>
+                <p>WhatsApp se banao (“10 min me yaad dila”), yaha dekho/hatayo.</p>
+              </div>
+              {rems.length === 0 ? (
+                <EmptyState icon="⏰" title="Koi reminder nahi">WhatsApp pe bolo <b>“10 min me yaad dila dena”</b> — yahi dikhega.</EmptyState>
+              ) : (
+                <>
+                  {pending.length > 0 && (
+                    <>
+                      <SectionHeader title="Pending" right={`${pending.length}`} />
+                      <ul className="list">
+                        {pending.map((r) => (
+                          <li key={r.id}>
+                            <div className="li-head"><b>⏰ {r.title}</b><a href="#" className="link-danger" onClick={(e) => { e.preventDefault(); delRem(r.id); }}>hatayo</a></div>
+                            <small>{new Date(r.remind_at).toLocaleString("en-IN")} · {relTime(r.remind_at)} · {r.source}</small>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                  {rems.filter((r) => r.sent).length > 0 && (
+                    <>
+                      <SectionHeader title="Bhej diye" right="done" />
+                      <ul className="list">
+                        {rems.filter((r) => r.sent).map((r) => (
+                          <li key={r.id}>
+                            <div className="li-head"><b>✅ {r.title}</b></div>
+                            <small>{new Date(r.remind_at).toLocaleString("en-IN")} · {r.source}</small>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </>
+              )}
+            </>
+          )}
+
+          {tab === "mem" && (
+            <>
+              <div className="page-head">
+                <h1>Memory 🧠</h1>
+                <p>WhatsApp pe “yaad rakhna...” bola to yaha save hota hai.</p>
+              </div>
+              {mems.length === 0 ? (
+                <EmptyState icon="🧠" title="Abhi kuch yaad nahi">Bolo <b>“yaad rakhna, mera naam…”</b> — pakki memory ban jayegi.</EmptyState>
+              ) : (
+                <ul className="list">
+                  {mems.map((m) => (
+                    <li key={m.id}>
+                      <div className="li-head"><b>🧠 {m.fact}</b><a href="#" className="link-danger" onClick={(e) => { e.preventDefault(); delMem(m.id); }}>bhool jao</a></div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+
+          {tab === "chat" && (
+            <>
+              <div className="page-head">
+                <h1>Chat 💬</h1>
+                <p>Recent baatcheet — latest neeche.</p>
+              </div>
+              {chat.length === 0 ? (
+                <EmptyState icon="💬" title="Abhi koi baat nahi hui">Pehla <b>hi</b> bhej ke dekho!</EmptyState>
+              ) : (
+                <div className="card">
+                  <div className="chat">
+                    {chat.map((m, i) => (
+                      <div key={i} style={{ display: "contents" }}>
+                        <div className="bubble u">{m.body}<small>{new Date(m.created_at).toLocaleString("en-IN")}</small></div>
+                        {m.reply && <div className="bubble a">{m.reply}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </main>
+      </div>
+    </>
   );
 }

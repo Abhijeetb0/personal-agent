@@ -1,10 +1,12 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
 import { supabaseBrowser } from "../../lib/supabase-browser";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
+  const [showPw, setShowPw] = useState(false);
   const [mode, setMode] = useState<"in" | "up">("in");
   const [err, setErr] = useState("");
   const [info, setInfo] = useState("");
@@ -48,26 +50,33 @@ export default function Login() {
   }
 
   return (
-    <main className="wrap" style={{ maxWidth: 420 }}>
-      <div className="hero">
-        <h1>Personal <span>Agent</span></h1>
+    <main className="auth-wrap">
+      <div className="auth-logo">
+        <div className="brand-mark">🤖</div>
+        <h1>Personal Agent</h1>
         <p>{mode === "in" ? "Wapas welcome! Login karo." : "Naya account banao — free hai."}</p>
       </div>
       <div className="card">
+        <div className="auth-tabs">
+          <button type="button" className={mode === "in" ? "on" : ""} onClick={() => { setMode("in"); setErr(""); setInfo(""); }}>Login</button>
+          <button type="button" className={mode === "up" ? "on" : ""} onClick={() => { setMode("up"); setErr(""); setInfo(""); }}>Signup</button>
+        </div>
         <form onSubmit={submit}>
-          <input type="email" required placeholder="Email" value={email} onChange={(e) => setEmail(e.currentTarget.value)} />
-          <input type="password" required placeholder="Password (min 6)" value={pw} onChange={(e) => setPw(e.currentTarget.value)} />
-          <button disabled={loading} style={{ width: "100%" }}>{loading ? "Ruko..." : mode === "in" ? "Login" : "Signup"}</button>
+          <label className="label" htmlFor="email">Email</label>
+          <input id="email" type="email" required placeholder="tum@email.com" value={email} onChange={(e) => setEmail(e.currentTarget.value)} />
+          <label className="label" htmlFor="pw">Password</label>
+          <div className="pw-wrap">
+            <input id="pw" type={showPw ? "text" : "password"} required placeholder="Min 6 characters" value={pw} onChange={(e) => setPw(e.currentTarget.value)} />
+            <button type="button" onClick={() => setShowPw(!showPw)}>{showPw ? "Hide" : "Show"}</button>
+          </div>
+          <button className="block" disabled={loading}>{loading ? "Ruko..." : mode === "in" ? "→ Login" : "✨ Account banao"}</button>
         </form>
-        {err && <p className="err">{err}</p>}
-        {info && <p className="ok-text">{info}</p>}
-        <p className="muted" style={{ marginTop: 12 }}>
-          {mode === "in" ? "Account nahi hai? " : "Account hai? "}
-          <a href="#" onClick={(e) => { e.preventDefault(); setMode(mode === "in" ? "up" : "in"); }}>
-            {mode === "in" ? "Signup karo" : "Login karo"}
-          </a>
-        </p>
+        {err && <p className="err" style={{ marginTop: 12 }}>{err}</p>}
+        {info && <p className="ok-text" style={{ marginTop: 12 }}>{info}</p>}
       </div>
+      <p className="muted" style={{ textAlign: "center" }}>
+        <Link href="/">← Wapas home</Link>
+      </p>
     </main>
   );
 }
