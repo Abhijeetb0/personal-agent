@@ -9,12 +9,14 @@ type Reminder = { id: string; title: string; remind_at: string; sent: boolean; s
 type Memory = { id: string; fact: string };
 type Msg = { body: string; reply: string | null; created_at: string };
 type Contest = { name: string; startIST: string } | null;
+type ContestFull = { name: string; startAt: string; startIST: string; url: string };
 
-type Tab = "overview" | "connect" | "rems" | "mem" | "chat";
+type Tab = "overview" | "connect" | "contests" | "rems" | "mem" | "chat";
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "overview", label: "Overview", icon: "📊" },
   { id: "connect", label: "Connect", icon: "🔗" },
+  { id: "contests", label: "Contests", icon: "🏆" },
   { id: "rems", label: "Reminders", icon: "⏰" },
   { id: "mem", label: "Memory", icon: "🧠" },
   { id: "chat", label: "Chat", icon: "💬" },
@@ -45,9 +47,21 @@ export default function Dashboard() {
   const [mems, setMems] = useState<Memory[]>([]);
   const [chat, setChat] = useState<Msg[]>([]);
   const [contest, setContest] = useState<Contest>(null);
+  const [contests, setContests] = useState<{ upcoming: ContestFull[]; past: ContestFull[] } | null>(null);
   const [testText, setTestText] = useState("Hello! Agent test");
   const [testMsg, setTestMsg] = useState("");
   const [email, setEmail] = useState("");
+  // #1 reminder composer
+  const [showRemModal, setShowRemModal] = useState(false);
+  const [remTitle, setRemTitle] = useState("");
+  const [remWhen, setRemWhen] = useState("");
+  const [remErr, setRemErr] = useState("");
+  const [remSaving, setRemSaving] = useState(false);
+  // #2 memory composer + inline edit
+  const [memNew, setMemNew] = useState("");
+  const [editingMem, setEditingMem] = useState<string | null>(null);
+  const [editMemText, setEditMemText] = useState("");
+  const [toast, setToast] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -62,6 +76,8 @@ export default function Dashboard() {
       }
       const l = await fetch("/api/agent-leetcode");
       if (l.ok) setContest((await l.json()).contest);
+      const cl = await fetch("/api/agent-contests");
+      if (cl.ok) setContests(await cl.json());
     } catch {}
     try {
       const sb = supabaseBrowser();
@@ -146,6 +162,74 @@ export default function Dashboard() {
 
   async function delMem(id: string) {
     await supabaseBrowser().from("Memory").delete().eq("id", id);
+    load();
+  }
+
+  function toLocalInput(d: Date) {
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
+  function flash(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2600);
+  }
+
+  function openRemModal() {
+    setRemTitle("");
+    setRemWhen(toLocalInput(new Date(Date.now() + 60 * 60 * 1000)));
+    setRemErr("");
+    setShowRemModal(true);
+  }
+
+  async function saveReminder() {
+    setRemErr("");
+    const t = remTitle.trim();
+    if (!t) { setRemErr("Title likho — jaise 'Dawai lena'"); return; }
+    const at = new Date(remWhen);
+    if (!remWhen || isNaN(at.getTime())) { setRemErr("Date + time chuno"); return; }
+    if (at.getTime() <= Date.now()) { setRemErr("Future ka time chuno"); return; }
+    setRemSaving(true);
+    const { error } = await supabaseBrowser().from("Reminder").insert({ title: t.slice(0, 200), remind_at: at.toISOString(), source: "web" });
+    setRemSaving(false);
+    if (error) { setRemErr("Save fail: " + error.message); return; }
+    setShowRemModal(false);
+    setRemTitle("");
+    setRemWhen("");
+    flash("⏰ Reminder set ho gaya!");
+    load();
+  }
+
+  async function addMemory() {
+    const f = memNew.trim().slice(0, 300);
+    if (!f) return;
+    const { error } = await supabaseBrowser().from("Memory").insert({ fact: f });
+    if (error) { flash("Save fail — fir try karo"); return; }
+    setMemNew("");
+    flash("🧠 Yaad kar liya!");
+    load();
+  }
+
+  async function saveMemEdit(id: string) {
+    const f = editMemText.trim().slice(0, 300);
+    if (!f) return;
+    const { error } = await supabaseBrowser().from("Memory").update({ fact: f }).eq("id", id);
+    if (error) { flash("Edit fail — fir try karo"); return; }
+    setEditingMem(null);
+    flash("✏️ Update ho gaya!");
+    load();
+  }
+
+  async function remindForContest(c: ContestFull) {
+    const at = new Date(new Date(c.startAt).getTime() - 30 * 60 * 1000);
+    if (at.getTime() <= Date.now()) { flash("Ye contest shuru ho chuka hai"); return; }
+    const { error } = await supabaseBrowser().from("Reminder").insert({
+      title: `LeetCode: ${c.name} shuru hone wala hai`,
+      remind_at: at.toISOString(),
+      source: "leetcode",
+    });
+    if (error) { flash("Reminder fail — fir try karo"); return; }
+    flash("🏆 Contest reminder set — 30 min pehle ping ayega!");
     load();
   }
 
@@ -344,18 +428,80 @@ export default function Dashboard() {
               <div className="card">
                 <h2>✉️ Test message</h2>
                 <p className="desc">Owner number pe agent se ek message bhej ke connection verify karo.</p>
-                <textarea value={testText} onChange={(e) => setTestText(e.currentTarget.value)} rows={2} />
-                <button onClick={sendTest}>Send test →</button>
-                {testMsg && <p className="muted">{testMsg}</p>}
+                <textarea value={testText} onChange={(e) => setTestText(e.currentTarget.value)} rows={2} maxLength={500} placeholder="Kuch likho…" />
+                <p className="char-count">{testText.length}/500</p>
+                <button onClick={sendTest} disabled={!testText.trim() || !owner.trim()}>Send test →</button>
+                {testMsg && <p className={testMsg.startsWith("Bhej diya") ? "ok-text" : testMsg === "bhej rahe..." ? "muted" : "err"} style={{ marginTop: 10 }}>{testMsg === "bhej rahe..." ? "⏳ " + testMsg : testMsg}</p>}
+                {!owner.trim() && <p className="muted">Pehle upar owner number save karo.</p>}
               </div>
+            </>
+          )}
+
+          {tab === "contests" && (
+            <>
+              <div className="page-head">
+                <h1>Contests 🏆</h1>
+                <p>Live LeetCode contests — one-click reminder ke saath.</p>
+              </div>
+              {!contests ? (
+                <div className="card"><Skeleton h={20} w="60%" /><div style={{ height: 10 }} /><Skeleton h={14} /><div style={{ height: 8 }} /><Skeleton h={14} w="80%" /></div>
+              ) : (
+                <>
+                  {contests.upcoming.length > 0 && (
+                    <div className="card">
+                      <div className="contest-hero">
+                        <span className="big-emoji">🏆</span>
+                        <div style={{ flex: 1, minWidth: 200 }}>
+                          <h2>{contests.upcoming[0]!.name}</h2>
+                          <p className="desc" style={{ marginBottom: 4 }}>{contests.upcoming[0]!.startIST} IST · <b style={{ color: "var(--accent-2)" }}>{relTime(contests.upcoming[0]!.startAt)}</b></p>
+                          <a href={contests.upcoming[0]!.url} target="_blank" rel="noreferrer">LeetCode pe kholo →</a>
+                        </div>
+                        <button onClick={() => remindForContest(contests.upcoming[0]!)}>⏰ 30 min pehle yaad dila</button>
+                      </div>
+                    </div>
+                  )}
+                  {contests.upcoming.length > 1 && (
+                    <>
+                      <SectionHeader title="Aane wale" right={`${contests.upcoming.length - 1} aur`} />
+                      <ul className="list">
+                        {contests.upcoming.slice(1).map((c, i) => (
+                          <li key={i}>
+                            <div className="contest-row"><b>🗓 {c.name}</b><button className="ghost sm" onClick={() => remindForContest(c)}>⏰ remind</button></div>
+                            <small>{c.startIST} IST · {relTime(c.startAt)}</small>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                  {contests.upcoming.length === 0 && (
+                    <EmptyState icon="🏆" title="Abhi koi upcoming contest nahi">LeetCode schedule aate hi yahi dikhega.</EmptyState>
+                  )}
+                  {contests.past.length > 0 && (
+                    <>
+                      <SectionHeader title="Ho chuke" right="practice ke liye" />
+                      <ul className="list">
+                        {contests.past.map((c, i) => (
+                          <li key={i}>
+                            <div className="contest-row"><b>✅ {c.name}</b><a href={c.url} target="_blank" rel="noreferrer">kholo →</a></div>
+                            <small>{c.startIST} IST</small>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </>
+              )}
             </>
           )}
 
           {tab === "rems" && (
             <>
-              <div className="page-head">
-                <h1>Reminders ⏰</h1>
-                <p>WhatsApp se banao (“10 min me yaad dila”), yaha dekho/hatayo.</p>
+              <div className="tab-head">
+                <div className="page-head">
+                  <h1>Reminders ⏰</h1>
+                  <p>WhatsApp se banao (“10 min me yaad dila”), ya yahi se set karo.</p>
+                </div>
+                <button className="sm" onClick={openRemModal}>＋ Naya</button>
               </div>
               {rems.length === 0 ? (
                 <EmptyState icon="⏰" title="Koi reminder nahi">WhatsApp pe bolo <b>“10 min me yaad dila dena”</b> — yahi dikhega.</EmptyState>
@@ -396,7 +542,14 @@ export default function Dashboard() {
             <>
               <div className="page-head">
                 <h1>Memory 🧠</h1>
-                <p>WhatsApp pe “yaad rakhna...” bola to yaha save hota hai.</p>
+                <p>WhatsApp pe “yaad rakhna...” bola to yaha save hota hai — ya khud likh do.</p>
+              </div>
+              <div className="card">
+                <div className="row">
+                  <input value={memNew} onChange={(e) => setMemNew(e.currentTarget.value)} placeholder="Yaad rakhna: mera naam…" maxLength={300} />
+                  <button onClick={addMemory} disabled={!memNew.trim()}>Yaad rakho</button>
+                </div>
+                {memNew.trim() && <p className="char-count">{memNew.trim().length}/300</p>}
               </div>
               {mems.length === 0 ? (
                 <EmptyState icon="🧠" title="Abhi kuch yaad nahi">Bolo <b>“yaad rakhna, mera naam…”</b> — pakki memory ban jayegi.</EmptyState>
@@ -404,7 +557,17 @@ export default function Dashboard() {
                 <ul className="list">
                   {mems.map((m) => (
                     <li key={m.id}>
-                      <div className="li-head"><b>🧠 {m.fact}</b><a href="#" className="link-danger" onClick={(e) => { e.preventDefault(); delMem(m.id); }}>bhool jao</a></div>
+                      {editingMem === m.id ? (
+                        <div className="inline-edit">
+                          <textarea value={editMemText} onChange={(e) => setEditMemText(e.currentTarget.value)} rows={2} maxLength={300} />
+                          <div className="row">
+                            <button className="sm" onClick={() => saveMemEdit(m.id)}>Save</button>
+                            <button className="ghost sm" onClick={() => setEditingMem(null)}>Cancel</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="li-head"><b>🧠 {m.fact}</b><a href="#" onClick={(e) => { e.preventDefault(); setEditingMem(m.id); setEditMemText(m.fact); }}>edit</a><a href="#" className="link-danger" onClick={(e) => { e.preventDefault(); delMem(m.id); }}>bhool jao</a></div>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -436,6 +599,31 @@ export default function Dashboard() {
           )}
         </main>
       </div>
+
+      {showRemModal && (
+        <div className="modal-backdrop" onClick={() => setShowRemModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>⏰ Naya reminder</h2>
+            <p className="desc">Time aane pe agent WhatsApp pe ping karega.</p>
+            <label className="label" htmlFor="rem-title">Kya yaad dilana hai?</label>
+            <input id="rem-title" value={remTitle} onChange={(e) => setRemTitle(e.currentTarget.value)} placeholder="Dawai lena" maxLength={200} />
+            <label className="label" htmlFor="rem-when">Kab?</label>
+            <div className="chips">
+              <button type="button" className="chip" onClick={() => setRemWhen(toLocalInput(new Date(Date.now() + 10 * 60 * 1000)))}>10 min me</button>
+              <button type="button" className="chip" onClick={() => setRemWhen(toLocalInput(new Date(Date.now() + 60 * 60 * 1000)))}>1 ghante me</button>
+              <button type="button" className="chip" onClick={() => { const d = new Date(Date.now() + 24 * 60 * 60 * 1000); d.setHours(8, 0, 0, 0); setRemWhen(toLocalInput(d)); }}>Kal subah 8 baje</button>
+            </div>
+            <input id="rem-when" type="datetime-local" value={remWhen} onChange={(e) => setRemWhen(e.currentTarget.value)} />
+            {remErr && <p className="err">{remErr}</p>}
+            <div className="modal-actions">
+              <button className="ghost" onClick={() => setShowRemModal(false)}>Cancel</button>
+              <button onClick={saveReminder} disabled={remSaving}>{remSaving ? "Save..." : "⏰ Set karo"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && <div className="toast">{toast}</div>}
     </>
   );
 }

@@ -7,7 +7,7 @@ import {
 } from "./baileys.js";
 import { setOwnerNumber, getOwnerNumber } from "./store.js";
 import { normalize } from "./whitelist.js";
-import { nextLeetCodeContest, formatIST } from "./leetcode.js";
+import { nextLeetCodeContest, formatIST, allLeetCodeContests, upcomingContests, pastContests } from "./leetcode.js";
 import { generalLimiter, sensitiveLimiter, sendLimiter } from "./rateLimit.js";
 
 declare global {
@@ -140,6 +140,18 @@ export function buildRoutes() {
     const c = await nextLeetCodeContest();
     if (!c) return res.json({ contest: null });
     res.json({ contest: { name: c.name, startAt: c.startAt, startIST: formatIST(c.startAt), url: c.url } });
+  });
+
+  // Dashboard contests tab: upcoming (pehle 3) + past (pehle 3) — 10-min cache agent me
+  app.get("/leetcode", auth, async (_req, res) => {
+    try {
+      const all = await allLeetCodeContests();
+      const up = upcomingContests(all).slice(0, 3).map((c) => ({ name: c.name, startAt: c.startAt, startIST: formatIST(c.startAt), url: `https://leetcode.com/contest/${c.slug}` }));
+      const past = pastContests(all).slice(0, 3).map((c) => ({ name: c.name, startAt: c.startAt, startIST: formatIST(c.startAt), url: `https://leetcode.com/contest/${c.slug}` }));
+      res.json({ upcoming: up, past });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
   });
 
   return app;
