@@ -4,7 +4,7 @@ import { sbAdmin } from "./sb.js";
 import {
   allSessions, getSession, isStarting, requestReconnect,
 } from "./baileys.js";
-import { listSessionUsers } from "./store.js";
+import { listPairedUsers } from "./store.js";
 
 const QR_GRACE_MS = 120_000; // QR aane ke 2 min tak reconnect mat chhedo (scan ka time do)
 const STAGGER_MS = 5_000; // har user me gap (WhatsApp spike + Render load se bachne ke liye)
@@ -16,9 +16,13 @@ function shouldSkip(userId: string): { skip: boolean; reason: string } {
   const s = getSession(userId);
   if (s.status === "connected") return { skip: true, reason: "connected" };
   if (isStarting(userId)) return { skip: true, reason: "starting" };
-  // QR fresh hai to user scan kar raha hoga — disturb mat karo
-  if (s.status === "qr" && Date.now() - s.lastQrAt < QR_GRACE_MS) {
-    return { skip: true, reason: "qr-grace" };
+  // General fix: manual scan pending hai — auto-retry bekar (wake/watchdog dono skip)
+  if (s.needsScan) return { skip: true, reason: "needs-scan" };
+  // QR aaya hua hai to user scan kar raha hoga — watchdog disturb mat karo (grace ke baad bhi nahi,
+  // QR-timeout counter close-handler me badhega aur MAX pe needsScan lagayega)
+  if (s.status === "qr") {
+    const age = Date.now() - s.lastQrAt;
+    return { skip: true, reason: age < QR_GRACE_MS ? "qr-grace" : "qr-wait" };
   }
   // Logged out: QR hi chahiye, auto-retry bekar
   if ((s.lastClose?.code as number) === DisconnectReason.loggedOut) {
@@ -31,9 +35,10 @@ function shouldSkip(userId: string): { skip: boolean; reason: string } {
   return { skip: false, reason: "" };
 }
 
-// Har 3 min: DB ke saare login users + memory ke sessions check karo, dead ko jagao.
+// Har 1 min: DB ke paired users + memory ke sessions check karo, dead ko jagao.
+// Sirf paired users (valid creds) — ghost QR-loop yaha se kabhi nahi jagega.
 // Render sleep ke baad timer mar jata hai, par wake hote hi ye loop wapas chalta hai
-// aur close-handler ke miss hue retry ko pakad leta hai — 1-2 din baad bhi connected.
+// aur close-handler ke miss hue retry ko pakad leta hai — login ke bina bhi connected.
 export function startWatchdog() {
   if (!sbAdmin) {
     logger.info("[watchdog] DB nahi hai — watchdog off");
@@ -41,7 +46,7 @@ export function startWatchdog() {
   }
   const tick = async () => {
     try {
-      const dbUsers = await listSessionUsers();
+      const dbUsers = await listPairedUsers();
       const memUsers = allSessions().map((s) => s.userId);
       const users = [...new Set([...dbUsers, ...memUsers])];
       if (users.length === 0) return;

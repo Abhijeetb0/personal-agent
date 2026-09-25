@@ -15,8 +15,8 @@ function modelList(): string[] {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+  // NOTE: groq/compound-mini retire ho chuka hai (404) — default se hataya.
   const defaults = [
-    "groq/compound-mini",
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
     "qwen/qwen3.6-27b",

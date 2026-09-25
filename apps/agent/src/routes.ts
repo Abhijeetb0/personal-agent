@@ -7,7 +7,7 @@ import {
   getSession, ensureSession, sendWhatsAppMessage, resetSession, requestPairingCode,
   allSessions, requestReconnect,
 } from "./baileys.js";
-import { setOwnerNumber, getOwnerNumber, listSessionUsers } from "./store.js";
+import { setOwnerNumber, getOwnerNumber, listPairedUsers } from "./store.js";
 import { getWebMirror, setWebMirror } from "./store.js";
 import { normalize } from "./whitelist.js";
 import { nextLeetCodeContest, formatIST, allLeetCodeContests, upcomingContests, pastContests } from "./leetcode.js";
@@ -46,13 +46,15 @@ export function buildRoutes() {
     }
     lastWakeAt = Date.now();
     try {
-      const dbUsers = await listSessionUsers().catch(() => [] as string[]);
+      // General fix: sirf paired users jagao — ghost QR-loop pinger se kabhi nahi jagega.
+      // (needsScan/qr guard requestReconnect ke andar hai, force bhi bypass nahi karega.)
+      const dbUsers = await listPairedUsers().catch(() => [] as string[]);
       const memUsers = allSessions().map((s) => s.userId);
       const users = [...new Set([...dbUsers, ...memUsers])];
       let woke = 0;
       for (const u of users) {
         // force:true — backoff wait nahi karega (pinger 5-min pe hai, spam nahi banega).
-        // loggedOut/connected/starting cases requestReconnect khud skip karta hai.
+        // connected/starting/loggedOut/needsScan/qr cases requestReconnect khud skip karta hai.
         if (requestReconnect(u, { reason: "wake-ping", force: true })) woke += 1;
       }
       logger.info({ woke, total: users.length }, "[wake] ping aaya");
@@ -84,7 +86,7 @@ export function buildRoutes() {
     const s = getSession(needUser(req));
     const reconnectInSec = s.nextRetryAt ? Math.max(0, Math.round((s.nextRetryAt - Date.now()) / 1000)) : null;
     res.json({
-      status: s.status,
+      status: s.needsScan ? "needs-scan" : s.status,
       connected: s.status === "connected",
       wsOpen: (s.sock as any)?.ws?.readyState === 1,
       lastClose: s.lastClose,
@@ -92,6 +94,9 @@ export function buildRoutes() {
       // Dashboard waking UI ke liye: retry kab hoga + kitni baar fail hua
       reconnectAttempts: s.reconnectAttempts || 0,
       reconnectInSec,
+      // General fix: dashboard saaf dikhaye — QR scan pending hai ya reconnect chal raha hai
+      needsScan: s.needsScan || false,
+      qrTimeouts: s.qrTimeouts || 0,
     });
   });
 

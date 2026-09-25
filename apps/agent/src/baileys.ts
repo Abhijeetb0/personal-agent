@@ -9,7 +9,7 @@ import fs from "node:fs/promises";
 import logger from "./logger.js";
 import {
   restoreAuthFromSupabase, saveAuthToSupabase, setStatus,
-  clearSupabaseSession, listSessionUsers, getOwnerNumber,
+  clearSupabaseSession, listSessionUsers, listPairedUsers, hasStoredCreds, getOwnerNumber,
 } from "./store.js";
 import { handleIncomingMessage } from "./handler.js";
 
@@ -31,6 +31,9 @@ export interface UserSession {
   // Self-heal: exponential backoff state (Render sleep / WA idle drop se bachne ke liye)
   reconnectAttempts: number;
   nextRetryAt: number;
+  // General fix: QR ghost-loop guard — scan ke bina retry bekar hai
+  needsScan: boolean;
+  qrTimeouts: number;
 }
 
 const sessions = new Map<string, UserSession>();
@@ -43,6 +46,7 @@ export function getSession(userId: string): UserSession {
       lastQr: null, lastQrAt: 0, pairingCode: null, pairingCodeAt: 0,
       lastClose: null, generation: 0, ownerNumber: "",
       reconnectAttempts: 0, nextRetryAt: 0,
+      needsScan: false, qrTimeouts: 0,
     };
     sessions.set(userId, s);
   }
@@ -59,6 +63,14 @@ function authDir(userId: string): string {
 
 // Reconnect backoff: 5s -> 30s -> 2min -> 10min cap (WhatsApp ban-risk se bachne ke liye spam nahi)
 export const RECONNECT_DELAYS = [5_000, 30_000, 120_000, 600_000];
+
+// General fix: lagatar QR-timeout (scan hi nahi hua) pe auto-retry band — manual scan chahiye.
+// Network drop (515/516/503...) pe retry chalta rahega, sirf QR-timeout (408 QR refs) pe rukega.
+export const MAX_QR_TIMEOUTS = 5;
+
+export function isQrTimeout(code: unknown, detail: string): boolean {
+  return code === 408 && /qr refs attempts ended/i.test(detail || "");
+}
 
 export function computeReconnectDelay(attempt: number): number {
   if (attempt <= 0) return RECONNECT_DELAYS[0]!;
@@ -115,9 +127,11 @@ export async function startWhatsApp(userId: string) {
     if (connection === "open") {
       s.status = "connected";
       s.lastQr = null;
-      // Success: backoff reset (agla drop phir 5s se shuru hoga)
+      // Success: backoff + QR-timeout counter reset (agla drop phir 5s se shuru hoga)
       s.reconnectAttempts = 0;
       s.nextRetryAt = 0;
+      s.qrTimeouts = 0;
+      s.needsScan = false;
       logger.info({ userId: userId.slice(0, 8) }, "[wa] Connected!");
       await setStatus(userId, "connected");
       await saveAuthToSupabase(userId, authDir(userId), "connected");
@@ -126,18 +140,30 @@ export async function startWhatsApp(userId: string) {
       const err = lastDisconnect?.error as any;
       const code = err?.output?.statusCode;
       const loggedOut = code === DisconnectReason.loggedOut;
-      logger.info({ userId: userId.slice(0, 8), code, loggedOut, detail: err?.message || err }, "[wa] closed");
+      const detail = String(err?.message || err || "");
+      logger.info({ userId: userId.slice(0, 8), code, loggedOut, detail }, "[wa] closed");
       if (myGen !== s.generation) return;
       s.status = "disconnected";
-      s.lastClose = { code, detail: String(err?.message || err || ""), at: Date.now() };
+      s.lastClose = { code, detail, at: Date.now() };
       await setStatus(userId, "disconnected");
+      // General fix: QR-timeout (scan nahi hua) ko alag gino — N baar ke baad auto-retry band.
+      if (isQrTimeout(code, detail)) {
+        s.qrTimeouts += 1;
+        if (s.qrTimeouts >= MAX_QR_TIMEOUTS) {
+          s.needsScan = true;
+          s.reconnectAttempts = 0;
+          s.nextRetryAt = 0;
+          logger.info({ userId: userId.slice(0, 8), qrTimeouts: s.qrTimeouts }, "[wa] QR scan nahi hua — auto-retry band, dashboard se scan karo");
+          return;
+        }
+      }
       if (!loggedOut) {
         s.reconnectAttempts += 1;
         const delay = computeReconnectDelay(s.reconnectAttempts);
         s.nextRetryAt = Date.now() + delay;
         logger.info({ userId: userId.slice(0, 8), attempt: s.reconnectAttempts, delayMs: delay }, "[wa] backoff reconnect scheduled...");
         setTimeout(() => {
-          if (myGen === s.generation) startWhatsApp(userId).catch((e) => logger.error({ err: e }, "[wa] reconnect fail"));
+          if (myGen === s.generation && !s.needsScan) startWhatsApp(userId).catch((e) => logger.error({ err: e }, "[wa] reconnect fail"));
         }, delay);
       } else {
         // Logged out: retry bekar hai (QR hi chahiye) — watchdog bhi skip karega
@@ -209,6 +235,9 @@ export async function resetSession(userId: string) {
   s.reconnectAttempts = 0;
   s.nextRetryAt = 0;
   s.lastClose = null;
+  // Manual reset: QR-loop guard saaf (user khud scan karega)
+  s.needsScan = false;
+  s.qrTimeouts = 0;
   await fs.rm(authDir(userId), { recursive: true, force: true }).catch(() => {});
   await clearSupabaseSession(userId);
   logger.info({ userId: userId.slice(0, 8) }, "[wa] session reset — fresh QR ban raha hai...");
@@ -238,12 +267,45 @@ export async function sendWhatsAppMessage(userId: string, jid: string, text: str
   await s.sock.sendMessage(jid, { text });
 }
 
-// Boot: jin users ki session DB me hai, sab start karo
+// Boot: jin paired users ki session DB me hai, sab start karo (ghost nahi).
+// Retry ke saath taaki Render wake pe transient DB fail me session miss na ho.
 export async function startAllSessions() {
-  const users = await listSessionUsers();
+  let users: string[] = [];
+  for (let i = 0; i < 3; i++) {
+    try {
+      users = await listPairedUsers();
+      break;
+    } catch (e) {
+      logger.error({ err: e, try: i + 1 }, "[agent] paired users list fail, retry...");
+      await new Promise((r) => setTimeout(r, 10_000));
+    }
+  }
+  // Fallback: purani list (paired filter fail ho to kam se kam kuch start ho)
+  if (users.length === 0) {
+    users = await listSessionUsers().catch(() => [] as string[]);
+  }
   logger.info({ count: users.length }, "[agent] saved sessions milin, start kar rahe...");
   for (const u of users) {
     ensureSession(u);
+  }
+}
+
+// Auth-free periodic ensure (login ke bina wake-up): watchdog/interval se chalta hai.
+// Sirf paired users, connected/starting/needsScan ko chhedega nahi.
+export async function ensureAllSessions(reason = "ensure-loop") {
+  let users: string[] = [];
+  try {
+    users = await listPairedUsers();
+  } catch {
+    return;
+  }
+  if (users.length === 0) return;
+  for (const u of users) {
+    const s = getSession(u);
+    if (s.status === "connected" || s.needsScan || starting.has(u)) continue;
+    // Khali-creds ghost: DB blob check (memory flag restart pe kho jata hai)
+    if (!s.sock && !(await hasStoredCreds(u).catch(() => false))) continue;
+    requestReconnect(u, { reason });
   }
 }
 
@@ -266,15 +328,19 @@ export function ensureSession(userId: string) {
 // Watchdog / scheduler ke liye: dead session ko backoff respect karke jagao.
 // - connected pe kuch nahi, starting pe kuch nahi (duplicate socket rokna hai)
 // - loggedOut (401) pe kabhi auto-retry nahi (QR hi chahiye)
+// - needsScan / qr-status pe kabhi auto-retry nahi (manual scan chahiye) — force bhi bypass nahi karega
 // - force=false to nextRetryAt ka wait karo (close-handler ka timer + watchdog double-retry na kare)
+// - manual=true sirf user action se (reset/pairing/dashboard) — QR guard bypass karega
 // Returns true = reconnect shuru kiya, false = skip.
-export function requestReconnect(userId: string, opts: { force?: boolean; reason?: string } = {}): boolean {
+export function requestReconnect(userId: string, opts: { force?: boolean; reason?: string; manual?: boolean } = {}): boolean {
   const s = getSession(userId);
   if (s.status === "connected") return false;
   if (starting.has(userId)) return false;
+  // General fix: QR ghost-loop guard (wake-pinger ke force se bhi nahi jagega)
+  if (!opts.manual && (s.needsScan || s.status === "qr")) return false;
   const loggedOut = (s.lastClose?.code as number) === DisconnectReason.loggedOut;
   if (loggedOut) return false;
-  if (!opts.force && s.nextRetryAt && Date.now() < s.nextRetryAt) return false;
+  if (!opts.force && !opts.manual && s.nextRetryAt && Date.now() < s.nextRetryAt) return false;
   starting.add(userId);
   logger.info({ userId: userId.slice(0, 8), reason: opts.reason || "watchdog" }, "[wa] reconnect trigger");
   startWhatsApp(userId)
