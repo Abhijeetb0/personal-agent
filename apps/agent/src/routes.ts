@@ -1,11 +1,13 @@
 import express from "express";
 import cors from "cors";
 import QRCode from "qrcode";
+import logger from "./logger.js";
 import { authUserId } from "./sb.js";
 import {
   getSession, ensureSession, sendWhatsAppMessage, resetSession, requestPairingCode,
+  allSessions, requestReconnect,
 } from "./baileys.js";
-import { setOwnerNumber, getOwnerNumber } from "./store.js";
+import { setOwnerNumber, getOwnerNumber, listSessionUsers } from "./store.js";
 import { getWebMirror, setWebMirror } from "./store.js";
 import { normalize } from "./whitelist.js";
 import { nextLeetCodeContest, formatIST, allLeetCodeContests, upcomingContests, pastContests } from "./leetcode.js";
@@ -27,6 +29,38 @@ export function buildRoutes() {
   app.use(generalLimiter);
 
   app.get("/health", (_req, res) => res.json({ ok: true }));
+
+  // External pinger (UptimeRobot / cron-job) ke liye: HTTP alive + WA socket wake.
+  // /health sirf {ok:true} deta hai (Render health-check), ye dead socket ko jagata hai.
+  // Auth JWT nahi chahiye taaki pinger maar sake — WAKE_SECRET (?key= ya x-wake-key header) se secure.
+  // 60-sec throttle taaki abuse/double-ping se socket spam na ho.
+  let lastWakeAt = 0;
+  const WAKE_THROTTLE_MS = 60_000;
+  app.get("/wake", async (req, res) => {
+    const secret = process.env.WAKE_SECRET || "";
+    if (!secret) return res.status(503).json({ error: "WAKE_SECRET set nahi hai" });
+    const key = String(req.query.key || (req.headers["x-wake-key"] as string) || "");
+    if (key !== secret) return res.status(403).json({ error: "galat key" });
+    if (Date.now() - lastWakeAt < WAKE_THROTTLE_MS) {
+      return res.json({ ok: true, throttled: true });
+    }
+    lastWakeAt = Date.now();
+    try {
+      const dbUsers = await listSessionUsers().catch(() => [] as string[]);
+      const memUsers = allSessions().map((s) => s.userId);
+      const users = [...new Set([...dbUsers, ...memUsers])];
+      let woke = 0;
+      for (const u of users) {
+        // force:true — backoff wait nahi karega (pinger 5-min pe hai, spam nahi banega).
+        // loggedOut/connected/starting cases requestReconnect khud skip karta hai.
+        if (requestReconnect(u, { reason: "wake-ping", force: true })) woke += 1;
+      }
+      logger.info({ woke, total: users.length }, "[wake] ping aaya");
+      res.json({ ok: true, woke, total: users.length });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
 
   // Auth: Supabase JWT (website login) -> user_id. Sab WA APIs per-user.
   const auth = async (req: express.Request, res: express.Response, next: express.NextFunction) => {

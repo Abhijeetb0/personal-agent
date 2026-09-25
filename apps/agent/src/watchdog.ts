@@ -8,7 +8,7 @@ import { listSessionUsers } from "./store.js";
 
 const QR_GRACE_MS = 120_000; // QR aane ke 2 min tak reconnect mat chhedo (scan ka time do)
 const STAGGER_MS = 5_000; // har user me gap (WhatsApp spike + Render load se bachne ke liye)
-const TICK_MS = 3 * 60 * 1000; // har 3 min check (free limits safe, 1-min scheduler se halka)
+const TICK_MS = 60 * 1000; // har 1 min check (Render sleep fix: /wake pinger ke saath 1-5 min wake guarantee)
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -56,10 +56,10 @@ export function startWatchdog() {
       logger.error({ err: e }, "[watchdog] tick fail");
     }
   };
-  // Boot ke 30s baad pehli check (startAllSessions ko time do), phir har 3 min
+  // Boot ke 30s baad pehli check (startAllSessions ko time do), phir har 1 min
   setTimeout(tick, 30_000);
   setInterval(tick, TICK_MS);
-  logger.info("[watchdog] on (har 3 min self-heal)");
+  logger.info("[watchdog] on (har 1 min self-heal)");
 }
 
 // Tests ke liye export

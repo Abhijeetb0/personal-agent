@@ -217,7 +217,24 @@ export async function resetSession(userId: string) {
 
 export async function sendWhatsAppMessage(userId: string, jid: string, text: string) {
   const s = getSession(userId);
-  if (!s.sock) throw new Error("WhatsApp connected nahi hai");
+  if (!s.sock) {
+    // Socket hi nahi hai — jagao taaki agle tick/retry pe jaye (scheduler sent=false rakhega).
+    requestReconnect(userId, { reason: "send-no-sock" });
+    throw new Error("WhatsApp connected nahi hai — reconnect chal raha hai, 1 min me retry hoga");
+  }
+  const wsOpen = (s.sock as any)?.ws?.readyState === 1;
+  if (s.status !== "connected" || !wsOpen) {
+    // Transient drop: reconnect trigger + 15s tak socket khulne ka wait, phir 1 baar send.
+    requestReconnect(userId, { reason: "send-not-open" });
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      if (s.status === "connected" && (s.sock as any)?.ws?.readyState === 1) break;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    if (s.status !== "connected" || (s.sock as any)?.ws?.readyState !== 1) {
+      throw new Error("WhatsApp connected nahi hai — reconnect chal raha hai, 1 min me retry hoga");
+    }
+  }
   await s.sock.sendMessage(jid, { text });
 }
 

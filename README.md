@@ -20,9 +20,13 @@ Repo push karte hi auto-deploy hoga. Settings verify karo:
 - Environment:
   - `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SUPABASE_PUBLISHABLE_KEY`
   - `GROQ_API_KEY`, `GEMINI_API_KEY` (optional fallback)
+  - `WAKE_SECRET` (lamba random hex — `/wake` pinger ka password)
   - `NODE_VERSION=20`
-- **Sleep jugaad:** `cron-job.org` (free) → har 5 min `https://tumhara-url.onrender.com/health` ping.
-  (Render Free 15 min idle pe sota hai — reminder late ho sakta hai.)
+- **Sleep jugaad (2 pinger, dono must — website kholne ki zaroorat khatam):**
+  - `cron-job.org` (free) → har 5 min `GET https://tumhara-url.onrender.com/health` (HTTP alive)
+  - `UptimeRobot` (free) → har 5 min `GET https://tumhara-url.onrender.com/wake?key=TUMHARA_WAKE_SECRET` (WA socket wake + dead session reconnect)
+  - Dono me 2-3 min offset rakho → max gap 2-3 min, Render 15-min sleep me jayega hi nahi.
+  - Reminder 1-5 min late max aa sakta hai (cold-restart pe Baileys open time). `401 loggedOut` me dashboard se `Naya QR` hi lagega.
 
 ### 3. Website → Vercel (free)
 New Project → ye repo → **Root Directory = `apps/web`**. Env:
