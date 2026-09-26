@@ -62,6 +62,25 @@ function CallbackInner() {
               fail(`hash-session-fail | ${j.error || "unknown"}`);
               return;
             }
+            // Server cookies ke saath-saath client khud bhi session set kare
+            // (kuch browsers fetch ke Set-Cookie ko turant apply nahi karte).
+            // Direct call hai — PKCE/implicit flow-quirks se independent.
+            const { error: setErr } = await sb.auth.setSession({ access_token, refresh_token });
+            if (setErr) {
+              fail(`client-set-fail | ${setErr.message}`);
+              return;
+            }
+            // Dashboard bhejne se PEHLE pakka karo session dikh raha hai
+            let ok = false;
+            for (let i = 0; i < 10; i++) {
+              const { data } = await sb.auth.getSession();
+              if (data.session) { ok = true; break; }
+              await new Promise((res2) => setTimeout(res2, 300));
+            }
+            if (!ok) {
+              fail("cookie-missing | session set hua par read nahi ho raha");
+              return;
+            }
             if (!dead) {
               setMsg("Login ho gaya ✅ — dashboard khul raha…");
               window.location.href = "/dashboard";
