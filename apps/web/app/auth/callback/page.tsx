@@ -81,6 +81,15 @@ function CallbackInner() {
               fail("cookie-missing | session set hua par read nahi ho raha");
               return;
             }
+            // QR-fresh-login: apne device ko (re)register karo taaki purana
+            // remote-logout revoked flag clear ho (same-browser login loop fix).
+            try {
+              const { deviceId, deviceLabel } = await import("../../../lib/device");
+              await fetch("/api/devices", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: deviceId(), label: deviceLabel(), fresh: true }),
+              });
+            } catch {}
             if (!dead) {
               setMsg("Login ho gaya ✅ — dashboard khul raha…");
               window.location.href = "/dashboard";

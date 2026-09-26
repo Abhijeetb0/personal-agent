@@ -25,22 +25,26 @@ export async function GET() {
   return NextResponse.json({ devices: data || [] });
 }
 
-// Heartbeat: login + dashboard-visit pe row upsert (revoked ko KABHI overwrite nahi).
-// Row revoked hai to 403 + {revoked:true} (client khud logout karega).
+// Heartbeat: login + dashboard-visit pe row upsert.
+// - revoked row ko heartbeat KABHI un-revoke nahi karta (403 → client logout).
+// - fresh login (password/QR, fresh:true) un-revoke KARTA hai — user ne abhi
+//   credential prove kiya hai, to purana remote-logout irrelevant ho gaya.
+//   (Nahi to same browser me har login turant logout me phasta hai — infinite loop.)
 export async function POST(req: Request) {
   const m = await me();
   if (!m) return NextResponse.json({ error: "login required" }, { status: 401 });
   const body = await req.json().catch(() => ({} as any));
   const id = String(body?.id || "").slice(0, 64);
   const label = String(body?.label || "").slice(0, 120);
+  const fresh = body?.fresh === true;
   if (!id) return NextResponse.json({ error: "id chahiye" }, { status: 400 });
   const { data: rows } = await m.sb.from("UserDevice").select("id,revoked").eq("id", id);
   const row = (rows as any[])?.[0];
   if (row) {
-    if (row.revoked) return NextResponse.json({ error: "revoked", revoked: true }, { status: 403 });
-    const { error } = await m.sb.from("UserDevice").update({ label, ip: clientIp(req), last_seen: new Date().toISOString() }).eq("id", id);
+    if (row.revoked && !fresh) return NextResponse.json({ error: "revoked", revoked: true }, { status: 403 });
+    const { error } = await m.sb.from("UserDevice").update({ label, ip: clientIp(req), last_seen: new Date().toISOString(), ...(row.revoked ? { revoked: false } : {}) }).eq("id", id);
     if (error) return NextResponse.json({ error: "save fail" }, { status: 500 });
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, revived: !!row.revoked });
   }
   const { error } = await m.sb.from("UserDevice").insert({ id, user_id: m.user.id, label, ip: clientIp(req) });
   if (error) return NextResponse.json({ error: "save fail" }, { status: 500 });

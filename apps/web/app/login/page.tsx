@@ -4,7 +4,19 @@ import Link from "next/link";
 import { supabaseBrowser } from "../../lib/supabase-browser";
 import { useLang, LangToggle } from "../components/lang";
 import { tr } from "../../lib/i18n";
-import { deviceLabel } from "../../lib/device";
+import { deviceId, deviceLabel } from "../../lib/device";
+
+// Fresh login pe apne device ko (re)register karo — purana remote-logout
+// revoked flag yahi clear hota hai, warna same browser me login turant logout
+// me phasta hai. Best-effort: fail ho to bhi redirect (heartbeat baad me pakdega).
+async function registerDevice() {
+  try {
+    await fetch("/api/devices", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: deviceId(), label: deviceLabel(), fresh: true }),
+    });
+  } catch {}
+}
 
 export default function Login() {
   const [lang, setLang] = useLang();
@@ -91,12 +103,14 @@ export default function Login() {
       if (mode === "in") {
         const r = await sb.auth.signInWithPassword({ email, password: pw });
         if (r.error) throw r.error;
+        await registerDevice();
         window.location.href = "/dashboard";
       } else {
         const r = await sb.auth.signUp({ email, password: pw });
         if (r.error) throw r.error;
         if (r.data.session) {
           // email-confirm OFF hai → turant login
+          await registerDevice();
           window.location.href = "/dashboard";
         } else {
           // email-confirm ON hai → user ko saaf batao
