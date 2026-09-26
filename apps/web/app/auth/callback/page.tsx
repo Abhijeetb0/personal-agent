@@ -12,17 +12,34 @@ import { supabaseBrowser } from "../../../lib/supabase-browser";
 function CallbackInner() {
   const params = useSearchParams();
   const [msg, setMsg] = useState("Login ho raha… ⏳");
+  const [detail, setDetail] = useState("");
 
   useEffect(() => {
     let dead = false;
+    const fail = (d: string) => {
+      if (dead) return;
+      setDetail(d);
+      setMsg("Login fail ho gaya — neeche Detail wala text bhejo, turant thik kar dunga.");
+    };
     (async () => {
       const sb = supabaseBrowser();
       try {
+        // GoTrue khud error bhejta hai (jaise link invalid/used) — use pehle dikhao
+        const gErr = params.get("error");
+        if (gErr) {
+          fail(`gtrue-error | ${gErr} | ${params.get("error_description") || "no-desc"}`);
+          return;
+        }
         const tokenHash = params.get("token_hash");
         const type = params.get("type") as any;
+        const code = params.get("code");
+        const hasHash = typeof window !== "undefined" && window.location.hash.includes("access_token");
         if (tokenHash && type) {
           const { error } = await sb.auth.verifyOtp({ token_hash: tokenHash, type });
-          if (error) throw error;
+          if (error) {
+            fail(`verifyOtp-fail | ${error.message}`);
+            return;
+          }
         } else {
           // #hash tokens (implicit) ya ?code= — client khud URL se session uthata hai.
           // Thoda wait taaki detectSessionInUrl process ho jaye.
@@ -32,14 +49,17 @@ function CallbackInner() {
             if (data.session) { session = data.session; break; }
             await new Promise((r) => setTimeout(r, 300));
           }
-          if (!session) throw new Error("session nahi bani");
+          if (!session) {
+            fail(`no-session | code:${code ? "yes" : "no"} | hash:${hasHash ? "yes" : "no"} | token_hash:${tokenHash ? "yes" : "no"}`);
+            return;
+          }
         }
         if (!dead) {
           setMsg("Login ho gaya ✅ — dashboard khul raha…");
           window.location.href = "/dashboard";
         }
-      } catch {
-        if (!dead) setMsg("Login fail ho gaya — QR expire/link purana ho sakta hai. Naya QR banao ya password se login karo.");
+      } catch (e: any) {
+        fail(`exception | ${String(e?.message || e)}`);
       }
     })();
     return () => { dead = true; };
@@ -50,6 +70,7 @@ function CallbackInner() {
     <main className="auth-wrap">
       <div className="card" style={{ textAlign: "center" }}>
         <p>{msg}</p>
+        {detail && <p className="err" style={{ marginTop: 8, wordBreak: "break-all" }}>Detail: {detail}</p>}
         <p className="muted" style={{ marginTop: 12 }}>
           <a href="/login">← Login page</a>
         </p>
