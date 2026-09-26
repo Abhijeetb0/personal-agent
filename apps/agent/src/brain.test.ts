@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseAction, looksLikeProtocol, salvageProtocolText } from "./brain.js";
+import { parseAction, looksLikeProtocol, salvageProtocolText, requiredTools, reminderIntent, claimsReminderSet, claimsReminderList } from "./brain.js";
 
 describe("parseAction", () => {
   it("parses reply action", () => {
@@ -90,5 +90,45 @@ describe("salvageProtocolText", () => {
   it("handles escaped characters in text", () => {
     const result = salvageProtocolText('{"text":"Hello\\nWorld"}');
     expect(result).toBe("Hello\nWorld");
+  });
+});
+
+describe("requiredTools (reminder intent, typo samet)", () => {
+  it("sahi spelling pe remind mangta hai", () => {
+    expect(requiredTools("10 min me remind karna")).toContain("remind");
+  });
+
+  it("'remaind' typo pe bhi remind mangta hai (17:37 wala case)", () => {
+    expect(requiredTools("Abhi 2 min me remaind karna ki kaam rha remainder")).toContain("remind");
+  });
+
+  it("'11:11 me remaind karna' pe remind mangta hai", () => {
+    expect(requiredTools("11:11 me remaind karna ki kaam kar rha remainder")).toContain("remind");
+  });
+
+  it("'kon kon sa remainder laga hai' pe list mangta hai", () => {
+    expect(requiredTools("Kon kon sa remainder laga hua hai abhi?")).toContain("list_reminders");
+  });
+
+  it("aam chat pe kuch nahi mangta", () => {
+    expect(requiredTools("hiii, kaise ho")).toEqual([]);
+    expect(requiredTools("tum kon ho")).toEqual([]);
+  });
+});
+
+describe("false-confirmation guard", () => {
+  it("reminder intent pehchanta hai", () => {
+    expect(reminderIntent("2 min me remaind karna")).toBe(true);
+    expect(reminderIntent("hiii")).toBe(false);
+  });
+
+  it("'set ho gaya' daava pakadta hai", () => {
+    expect(claimsReminderSet("✅ 2 minute ke baad reminder set ho gaya!")).toBe(true);
+    expect(claimsReminderSet("Hi hi! Kaise chal raha hai?")).toBe(false);
+  });
+
+  it("bina-tool ginati pakadta hai", () => {
+    expect(claimsReminderList("Abhi do reminders set hain: 1... 2...")).toBe(true);
+    expect(claimsReminderList("Kuch puchna ho to batao")).toBe(false);
   });
 });

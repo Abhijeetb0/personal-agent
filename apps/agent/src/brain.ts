@@ -188,6 +188,37 @@ async function runTool(userId: string, name: string, args: Record<string, any>):
   }
 }
 
+// Reminder lafz ke common typo ("remaind", "remainder", "remider") —
+// user phone-keyboard se likhta hai, exact spelling ki ummeed mat rakho.
+const REMIND_WORD = "remind|remaind|remainder|remider|remindar";
+const LIST_WORD = "dikhao|dikha|show|list|batao|kon";
+
+export function requiredTools(t: string): string[] {
+  const n: string[] = [];
+  if (/contest|leetcode/i.test(t)) n.push("contest");
+  if (new RegExp(`(${LIST_WORD}).*(${REMIND_WORD})|(${REMIND_WORD}).*(${LIST_WORD})`, "i").test(t)) n.push("list_reminders");
+  else if (new RegExp(`${REMIND_WORD}|yaad\\s*dila|alarm|notify`, "i").test(t)) n.push("remind");
+  if (/yaad\s*rakh|remember|note\s*kar|save\s*kar.*(memory|yaad)/i.test(t)) n.push("remember");
+  else if (/bhool\s*ja|bhul\s*ja|forget/i.test(t)) n.push("forget");
+  else if (/(mera\s*naam|my\s*name\s*is|^i\s*am\s+[A-Z]|pasand\s*hai|mujhe.*pasand|my\s*favourite|my\s*favorite)\b/i.test(t)) n.push("remember");
+  return n;
+}
+
+// Broad intent (typo samet) — false-confirmation guard ke liye.
+export function reminderIntent(t: string): boolean {
+  return new RegExp(`${REMIND_WORD}|yaad|alarm|notify|ping`, "i").test(t);
+}
+
+// Bot ne tool chalaye BINA "set ho gaya" jaisa daava to nahi kiya?
+export function claimsReminderSet(t: string): boolean {
+  return /reminder set|set ho gaya|yaad dilaunga|ping aayega|reminder laga diya/i.test(t);
+}
+
+// Bot ne list_reminders chalaye BINA ginati to nahi suna di?
+export function claimsReminderList(t: string): boolean {
+  return /reminders?\s+set\s+hain|lag[ae]\s+(hua|hue)\s+hain|pending reminders/i.test(t);
+}
+
 function toRoleMsgs(history: string[]): ChatMsg[] {
   return history.slice(-8).map((h) => {
     const m = h.match(/^(User|Assistant):\s*([\s\S]*)$/);
@@ -208,16 +239,9 @@ export async function brainReply(userText: string, history: string[] = [], userI
     { role: "user", content: userText },
   ];
   // Data domains me tool LAZMI — bina tool jawab mana hai (hallucination rokne ke liye)
-  const needs = (t: string): string[] => {
-    const n: string[] = [];
-    if (/contest|leetcode/i.test(t)) n.push("contest");
-    if (/(dikhao|dikha|show|list).*remind|remind.*(dikhao|dikha|show|list|batao)/i.test(t)) n.push("list_reminders");
-    else if (/remind|yaad\s*dila|alarm|notify/i.test(t)) n.push("remind");
-    if (/yaad\s*rakh|remember|note\s*kar|save\s*kar.*(memory|yaad)/i.test(t)) n.push("remember");
-    else if (/bhool\s*ja|bhul\s*ja|forget/i.test(t)) n.push("forget");
-    else if (/(mera\s*naam|my\s*name\s*is|^i\s*am\s+[A-Z]|pasand\s*hai|mujhe.*pasand|my\s*favourite|my\s*favorite)\b/i.test(t)) n.push("remember");
-    return n;
-  };
+  // NOTE: user aksar "remaind/remainder" typo likhta hai — ye variants bhi pakdo,
+  // warna bot tool chalaye bina "set ho gaya" bol deta hai (false confirmation).
+  const needs = (t: string): string[] => requiredTools(t);
   const required = needs(userText);
   const used: string[] = [];
   let pendingReply: string | null = null;
@@ -260,6 +284,14 @@ export async function brainReply(userText: string, history: string[] = [], userI
       }
       pendingReply = act.text;
       const missing = required.filter((r) => !used.includes(r));
+      // False-confirmation guard: required khaali ho (typo waghera) par bot ne
+      // tool chalaye bina "set ho gaya" / ginati suna di ho to bhi tool LAZMI.
+      // (17:37 wala case: "remaind" typo pe verifier khaali tha, bot ne jhootha
+      // "set ho gaya" bol diya, DB me kuch save nahi hua.)
+      if (missing.length === 0 && reminderIntent(userText)) {
+        if (!used.includes("remind") && claimsReminderSet(act.text)) missing.push("remind");
+        else if (!used.includes("list_reminders") && claimsReminderList(act.text)) missing.push("list_reminders");
+      }
       if (missing.length > 0) {
         logger.info({ tools: missing }, "[brain] verifier: tool missing, dobara mang rahe...");
         pendingReply = null;
