@@ -188,8 +188,12 @@ export default function Dashboard() {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id: deviceId(), label: deviceLabel() }),
         });
-        if (b.status === 403) {
-          await supabaseBrowser().auth.signOut();
+        if (b.status === 403 || b.status === 401) {
+          // 403 = remote logout (revoked), 401 = session dead/expired.
+          // scope:'local' taaki SIRF ye device bahar ho — dusre devices zinda rahen.
+          // (Default 'global' hota hai jo SAB devices maar deta hai — QR-approve wali
+          // phone session bhi, isliye approve pe "login expire" aata tha.)
+          await supabaseBrowser().auth.signOut({ scope: "local" });
           window.location.href = "/login";
           return;
         }
@@ -256,7 +260,9 @@ export default function Dashboard() {
         body: JSON.stringify({ id: own, ownId: own }),
       });
     } catch {}
-    await supabaseBrowser().auth.signOut();
+    // scope:'local' — sirf YE device logout ho, dusre logged-in devices (jaise
+    // QR-approve wali phone session) zinda rahen. Default 'global' sab maar deta hai.
+    await supabaseBrowser().auth.signOut({ scope: "local" });
     window.location.href = "/login";
   }
 
