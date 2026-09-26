@@ -23,10 +23,22 @@ describe("computeReconnectDelay", () => {
 });
 
 describe("watchdog shouldSkip", () => {
-  it("connected ko skip karta hai", () => {
+  it("live (connected + WS open) ko skip karta hai", () => {
     const s = getSession("test-connected");
     s.status = "connected";
+    (s as any).sock = { ws: { readyState: 1 } };
+    s.needsScan = false;
     expect(shouldSkip("test-connected").skip).toBe(true);
+  });
+
+  it("half-open (connected par WS dead) ko skip nahi karta — reconnect allowed", () => {
+    const s = getSession("test-halfopen");
+    s.status = "connected";
+    (s as any).sock = { ws: { readyState: 0 } };
+    s.needsScan = false;
+    s.nextRetryAt = 0;
+    s.lastClose = null;
+    expect(shouldSkip("test-halfopen").skip).toBe(false);
   });
 
   it("loggedOut (401) ko kabhi auto-retry nahi", () => {

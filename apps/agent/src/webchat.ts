@@ -4,7 +4,7 @@ import { getAiReply } from "./ai.js";
 import { logMessage, recentHistory } from "./db.js";
 import { salvageProtocolText } from "./brain.js";
 import { getOwnerNumber, getWebMirror } from "./store.js";
-import { getSession, sendWhatsAppMessage } from "./baileys.js";
+import { isLive, getSession, sendWhatsAppMessage, resolveOutgoingJid } from "./baileys.js";
 
 // Dashboard web-chat: WhatsApp jaisa brain, par WhatsApp pe kuch nahi jata.
 // History owner-number se uthate hain (context continuity), log "webchat" se
@@ -63,11 +63,12 @@ async function mirrorToWhatsApp(userId: string, owner: string, question: string,
   try {
     if (!(await getWebMirror(userId))) return;
     if (!owner) return;
-    if (getSession(userId).status !== "connected") {
-      logger.info({ userId: userId.slice(0, 8) }, "[webchat] mirror skip: WhatsApp connected nahi");
+    const s = getSession(userId);
+    if (!isLive(s)) {
+      logger.info({ userId: userId.slice(0, 8) }, "[webchat] mirror skip: WhatsApp live nahi");
       return;
     }
-    await sendWhatsAppMessage(userId, `${owner}@s.whatsapp.net`, mirrorText(question, reply));
+    await sendWhatsAppMessage(userId, resolveOutgoingJid(s, owner), mirrorText(question, reply));
     logger.info({ userId: userId.slice(0, 8) }, "[webchat] mirrored to WhatsApp");
   } catch (e) {
     logger.error({ err: e }, "[webchat] mirror fail (web reply ok)");

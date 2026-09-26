@@ -1,6 +1,7 @@
 import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
+  isLidUser,
   useMultiFileAuthState,
 } from "@whiskeysockets/baileys";
 import type { WASocket } from "@whiskeysockets/baileys";
@@ -34,6 +35,9 @@ export interface UserSession {
   // General fix: QR ghost-loop guard — scan ke bina retry bekar hai
   needsScan: boolean;
   qrTimeouts: number;
+  // Last inbound chat JID (aksar @lid) — reminder/mirror isi pe bhejo taaki
+  // LID-migration ke baad PN JID pe send fail na ho. Fallback: owner@s.whatsapp.net.
+  lastIncomingJid: string | null;
 }
 
 const sessions = new Map<string, UserSession>();
@@ -47,6 +51,7 @@ export function getSession(userId: string): UserSession {
       lastClose: null, generation: 0, ownerNumber: "",
       reconnectAttempts: 0, nextRetryAt: 0,
       needsScan: false, qrTimeouts: 0,
+      lastIncomingJid: null,
     };
     sessions.set(userId, s);
   }
@@ -55,6 +60,31 @@ export function getSession(userId: string): UserSession {
 
 export function allSessions(): UserSession[] {
   return [...sessions.values()];
+}
+
+// Permanent fix (half-open socket): memory me status "connected" dikhe par
+// asal Baileys WS mar chuka ho (Render hibernate) to use live mat mano.
+// Scheduler/watchdog/wake sab isi pe faisla karenge taaki dead socket
+// "Connected" ban ke auto-heal se bach na paye.
+export function wsOpen(s: UserSession): boolean {
+  try {
+    return !!s.sock && (s.sock as any)?.ws?.readyState === 1;
+  } catch {
+    return false;
+  }
+}
+
+export function isLive(s: UserSession): boolean {
+  return s.status === "connected" && wsOpen(s);
+}
+
+// Reminder/mirror ke liye JID: last inbound (LID-safe) pehle, warna owner PN.
+export function resolveOutgoingJid(s: UserSession, ownerDigits: string): string {
+  const lid = s.lastIncomingJid;
+  if (lid && (isLidUser(lid) || lid.endsWith("@lid") || lid.endsWith("@s.whatsapp.net"))) {
+    return lid;
+  }
+  return `${ownerDigits}@s.whatsapp.net`;
 }
 
 function authDir(userId: string): string {
@@ -178,6 +208,11 @@ export async function startWhatsApp(userId: string) {
     for (const msg of messages) {
       if (msg.key.fromMe) continue;
       if (msg.key.remoteJid === "status@broadcast") continue;
+      // LID-aware outbound ke liye last inbound JID yaad rakho
+      try {
+        const jid = msg.key.participant || msg.key.remoteJid || null;
+        if (jid) s.lastIncomingJid = jid;
+      } catch {}
       await handleIncomingMessage(sock, msg, userId).catch((e) =>
         logger.error({ err: e }, "[wa] handler error")
       );
@@ -251,16 +286,22 @@ export async function sendWhatsAppMessage(userId: string, jid: string, text: str
     requestReconnect(userId, { reason: "send-no-sock" });
     throw new Error("WhatsApp connected nahi hai — reconnect chal raha hai, 1 min me retry hoga");
   }
-  const wsOpen = (s.sock as any)?.ws?.readyState === 1;
-  if (s.status !== "connected" || !wsOpen) {
-    // Transient drop: reconnect trigger + 15s tak socket khulne ka wait, phir 1 baar send.
-    requestReconnect(userId, { reason: "send-not-open" });
+  if (!isLive(s)) {
+    // Half-open (status connected, WS dead) ya transient drop: reconnect trigger +
+    // 15s tak socket khulne ka wait, phir 1 baar send. Fail pe status ko
+    // "disconnected" mark karo taaki watchdog/wake agli tick pe jagaye —
+    // warna stale "connected" me auto-heal skip hota rehta hai (reminder kabhi nahi jata).
+    requestReconnect(userId, { reason: "send-not-open", force: true });
     const deadline = Date.now() + 15_000;
     while (Date.now() < deadline) {
-      if (s.status === "connected" && (s.sock as any)?.ws?.readyState === 1) break;
+      if (isLive(s)) break;
       await new Promise((r) => setTimeout(r, 1000));
     }
-    if (s.status !== "connected" || (s.sock as any)?.ws?.readyState !== 1) {
+    if (!isLive(s)) {
+      s.status = "disconnected";
+      try {
+        await setStatus(userId, "disconnected");
+      } catch {}
       throw new Error("WhatsApp connected nahi hai — reconnect chal raha hai, 1 min me retry hoga");
     }
   }
@@ -302,7 +343,7 @@ export async function ensureAllSessions(reason = "ensure-loop") {
   if (users.length === 0) return;
   for (const u of users) {
     const s = getSession(u);
-    if (s.status === "connected" || s.needsScan || starting.has(u)) continue;
+    if (isLive(s) || s.needsScan || starting.has(u)) continue;
     // Khali-creds ghost: DB blob check (memory flag restart pe kho jata hai)
     if (!s.sock && !(await hasStoredCreds(u).catch(() => false))) continue;
     requestReconnect(u, { reason });
@@ -326,7 +367,8 @@ export function ensureSession(userId: string) {
 }
 
 // Watchdog / scheduler ke liye: dead session ko backoff respect karke jagao.
-// - connected pe kuch nahi, starting pe kuch nahi (duplicate socket rokna hai)
+// - live (connected + WS open) pe kuch nahi, starting pe kuch nahi (duplicate socket rokna hai)
+// - half-open (status connected par WS dead) pe JAGAO — yahi reminder-bug ka root cause tha
 // - loggedOut (401) pe kabhi auto-retry nahi (QR hi chahiye)
 // - needsScan / qr-status pe kabhi auto-retry nahi (manual scan chahiye) — force bhi bypass nahi karega
 // - force=false to nextRetryAt ka wait karo (close-handler ka timer + watchdog double-retry na kare)
@@ -334,7 +376,7 @@ export function ensureSession(userId: string) {
 // Returns true = reconnect shuru kiya, false = skip.
 export function requestReconnect(userId: string, opts: { force?: boolean; reason?: string; manual?: boolean } = {}): boolean {
   const s = getSession(userId);
-  if (s.status === "connected") return false;
+  if (isLive(s)) return false;
   if (starting.has(userId)) return false;
   // General fix: QR ghost-loop guard (wake-pinger ke force se bhi nahi jagega)
   if (!opts.manual && (s.needsScan || s.status === "qr")) return false;

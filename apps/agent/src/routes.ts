@@ -5,7 +5,7 @@ import logger from "./logger.js";
 import { authUserId } from "./sb.js";
 import {
   getSession, ensureSession, sendWhatsAppMessage, resetSession, requestPairingCode,
-  allSessions, requestReconnect,
+  allSessions, requestReconnect, isLive, wsOpen, resolveOutgoingJid,
 } from "./baileys.js";
 import { setOwnerNumber, getOwnerNumber, listPairedUsers } from "./store.js";
 import { getWebMirror, setWebMirror } from "./store.js";
@@ -85,10 +85,13 @@ export function buildRoutes() {
   app.get("/status", auth, (req, res) => {
     const s = getSession(needUser(req));
     const reconnectInSec = s.nextRetryAt ? Math.max(0, Math.round((s.nextRetryAt - Date.now()) / 1000)) : null;
+    const open = wsOpen(s);
+    const live = isLive(s);
     res.json({
-      status: s.needsScan ? "needs-scan" : s.status,
-      connected: s.status === "connected",
-      wsOpen: (s.sock as any)?.ws?.readyState === 1,
+      status: s.needsScan ? "needs-scan" : live ? s.status : s.status === "connected" ? "disconnected" : s.status,
+      connected: live,
+      wsOpen: open,
+      live,
       lastClose: s.lastClose,
       ownerNumber: s.ownerNumber || null,
       // Dashboard waking UI ke liye: retry kab hoga + kitni baar fail hua
@@ -115,12 +118,16 @@ export function buildRoutes() {
       const uid = needUser(req);
       const { to, text } = req.body as { to: string; text: string };
       if (!to || !text) return res.status(400).json({ error: "to + text chahiye" });
-      const owner = normalize(getSession(uid).ownerNumber || (await getOwnerNumber(uid)) || "");
+      const s = getSession(uid);
+      const owner = normalize(s.ownerNumber || (await getOwnerNumber(uid)) || "");
       const dest = normalize(to);
       if (!owner || !dest) return res.status(400).json({ error: "owner number set karo, sahi number do" });
       const same = dest === owner || (dest.length >= 10 && owner.length >= 10 && dest.slice(-10) === owner.slice(-10));
       if (!same) return res.status(403).json({ error: "sirf apne owner number pe bhej sakte ho" });
-      const jid = to.includes("@") ? to : `${to}@s.whatsapp.net`;
+      // Normalized JID (raw `to` me space/+ se invalid JID banta tha) + LID-safe:
+      // last inbound LID ho to usi pe bhejo, warna owner PN.
+      const raw = String(to);
+      const jid = raw.includes("@") ? raw : resolveOutgoingJid(s, dest);
       await sendWhatsAppMessage(uid, jid, text);
       res.json({ ok: true });
     } catch (e) {

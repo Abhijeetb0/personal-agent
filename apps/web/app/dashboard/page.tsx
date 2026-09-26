@@ -5,7 +5,7 @@ import { Brand, StatusPill, StatCard, EmptyState, SectionHeader, Skeleton, type 
 import { useLang, LangToggle } from "../components/lang";
 import { tr } from "../../lib/i18n";
 
-type Status = { status: string; connected: boolean; ownerNumber: string | null; reconnectAttempts?: number; reconnectInSec?: number | null; lastClose?: { code: unknown; detail: string; at: number } | null };
+type Status = { status: string; connected: boolean; wsOpen?: boolean; live?: boolean; ownerNumber: string | null; reconnectAttempts?: number; reconnectInSec?: number | null; lastClose?: { code: unknown; detail: string; at: number } | null };
 type Qr = { status: string; dataUrl: string | null };
 type Reminder = { id: string; title: string; remind_at: string; sent: boolean; source: string };
 type Memory = { id: string; fact: string };
@@ -258,11 +258,16 @@ export default function Dashboard() {
 
   async function sendTest() {
     setTestMsg("bhej rahe...");
-    const r = await fetch("/api/agent-send", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ to: owner, text: testText }),
-    });
-    setTestMsg(r.ok ? "Bhej diya! WhatsApp dekho ✅" : "Fail — pehle connect + owner number set karo");
+    try {
+      const r = await fetch("/api/agent-send", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: owner, text: testText }),
+      });
+      const j = await r.json().catch(() => ({} as any));
+      setTestMsg(r.ok ? "Bhej diya! WhatsApp dekho ✅" : `Fail: ${(j as any)?.error || "pehle connect + owner number set karo"}`);
+    } catch {
+      setTestMsg("Fail: agent se baat nahi hui");
+    }
   }
 
   async function delRem(id: string) {
@@ -524,7 +529,11 @@ export default function Dashboard() {
   }
 
   // ---- derived state ----
-  const connected = !!status?.connected;
+  // Permanent fix: backend ab half-open socket pe connected=false bhejta hai
+  // (status + wsOpen dono). `deadSocket` purane deployed agent ke saath bhi
+  // nakli "Connected" pakadta hai (connected=true par wsOpen=false).
+  const connected = !!status?.connected && status?.wsOpen !== false;
+  const deadSocket = !!status?.connected && status?.wsOpen === false;
   const isQr = status?.status === "qr";
   const isLoggedOut = (status?.lastClose as any)?.code === 401;
   const retrySec = status?.reconnectInSec ?? null;
@@ -535,7 +544,8 @@ export default function Dashboard() {
 
   let tone: ConnTone = "neutral";
   let statusText = "Loading...";
-  if (connected) { tone = "ok"; statusText = "Connected"; }
+  if (deadSocket) { tone = "bad"; statusText = "Socket dead — auto-restart ho raha, 1 min ruko"; }
+  else if (connected) { tone = "ok"; statusText = "Connected"; }
   else if (isQr) { tone = "wait"; statusText = "QR ready — scan karo"; }
   else if (isLoggedOut) { tone = "bad"; statusText = "Logged out — Naya QR lo"; }
   else if (status && (status.reconnectAttempts || 0) > 0) {
@@ -702,6 +712,8 @@ export default function Dashboard() {
                 <div className="qr-box">
                   {qr?.dataUrl ? (
                     <div className="qr"><img src={qr.dataUrl} alt="QR" width={220} height={220} /></div>
+                  ) : deadSocket ? (
+                    <p className="err">Socket dead hai — agent khud restart kar raha hai, 1 min me status badlega. Naya QR mat dabao.</p>
                   ) : connected ? (
                     <p className="ok-text">✅ Connected hai — owner number se message karke test karo.</p>
                   ) : (

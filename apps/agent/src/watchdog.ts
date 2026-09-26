@@ -2,7 +2,7 @@ import { DisconnectReason } from "@whiskeysockets/baileys";
 import logger from "./logger.js";
 import { sbAdmin } from "./sb.js";
 import {
-  allSessions, getSession, isStarting, requestReconnect,
+  allSessions, getSession, isStarting, requestReconnect, isLive,
 } from "./baileys.js";
 import { listPairedUsers } from "./store.js";
 
@@ -14,7 +14,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function shouldSkip(userId: string): { skip: boolean; reason: string } {
   const s = getSession(userId);
-  if (s.status === "connected") return { skip: true, reason: "connected" };
+  // Half-open (status connected, WS dead) ko skip mat karo — wahi reminder-bug tha.
+  if (isLive(s)) return { skip: true, reason: "connected" };
+  if (s.status === "connected") return { skip: false, reason: "" };
   if (isStarting(userId)) return { skip: true, reason: "starting" };
   // General fix: manual scan pending hai — auto-retry bekar (wake/watchdog dono skip)
   if (s.needsScan) return { skip: true, reason: "needs-scan" };
