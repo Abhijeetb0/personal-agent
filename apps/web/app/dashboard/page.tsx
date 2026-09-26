@@ -98,7 +98,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (tab === "files") loadFiles();
     if (tab === "devices") loadDevices();
-    if (tab !== "connect") stopScan();
+    if (tab !== "devices") stopScan();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
   const chatBoxRef = useRef<HTMLDivElement | null>(null);
@@ -910,37 +910,6 @@ export default function Dashboard() {
                   <b>{mirror ? tr(lang, "mirror.on") : tr(lang, "mirror.off")}</b>
                 </div>
               </div>
-
-              <div className="card">
-                <h2>📷 {tr(lang, "scan.title")}</h2>
-                <p className="desc">{tr(lang, "scan.desc")}</p>
-                {!scanning && !scanned && (
-                  <button onClick={startScan}>{tr(lang, "scan.start")}</button>
-                )}
-                {scanning && (
-                  <>
-                    <div id="qr-scan-region" style={{ width: "100%", maxWidth: 320 }} />
-                    <div className="row" style={{ marginTop: 10 }}>
-                      <label className="ghost sm" style={{ cursor: "pointer" }}>
-                        {tr(lang, "scan.gallery")}
-                        <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => scanFromFile(e.currentTarget.files?.[0])} />
-                      </label>
-                      <button className="ghost sm" onClick={stopScan}>{tr(lang, "btn.cancel")}</button>
-                    </div>
-                  </>
-                )}
-                {scanned && (
-                  <div className="card" style={{ marginTop: 12 }}>
-                    <h2>{tr(lang, "scan.approveQ")}</h2>
-                    <p className="desc">📱 {scanned.label}{scanned.ip ? ` • ${scanned.ip}` : ""}</p>
-                    <div className="row">
-                      <button onClick={() => approveLogin(true)} disabled={approving}>{approving ? "…" : tr(lang, "scan.approve")}</button>
-                      <button className="ghost" onClick={() => approveLogin(false)} disabled={approving}>{tr(lang, "scan.deny")}</button>
-                    </div>
-                  </div>
-                )}
-                {scanMsg && <p className="muted" style={{ marginTop: 10 }}>{scanMsg}</p>}
-              </div>
             </>
           )}
 
@@ -1169,6 +1138,36 @@ export default function Dashboard() {
               <div className="page-head">
                 <h1>{tr(lang, "dv.title")}</h1>
                 <p>{tr(lang, "dv.sub")}</p>
+              </div>
+              <div className="card">
+                <h2>📷 {tr(lang, "scan.title")}</h2>
+                <p className="desc">{tr(lang, "scan.desc")}</p>
+                {!scanning && !scanned && (
+                  <button onClick={startScan}>{tr(lang, "scan.start")}</button>
+                )}
+                {scanning && (
+                  <>
+                    <div id="qr-scan-region" style={{ width: "100%", maxWidth: 320 }} />
+                    <div className="row" style={{ marginTop: 10 }}>
+                      <label className="ghost sm" style={{ cursor: "pointer" }}>
+                        {tr(lang, "scan.gallery")}
+                        <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => scanFromFile(e.currentTarget.files?.[0])} />
+                      </label>
+                      <button className="ghost sm" onClick={stopScan}>{tr(lang, "btn.cancel")}</button>
+                    </div>
+                  </>
+                )}
+                {scanned && (
+                  <div className="card" style={{ marginTop: 12 }}>
+                    <h2>{tr(lang, "scan.approveQ")}</h2>
+                    <p className="desc">📱 {scanned.label}{scanned.ip ? ` • ${scanned.ip}` : ""}</p>
+                    <div className="row">
+                      <button onClick={() => approveLogin(true)} disabled={approving}>{approving ? "…" : tr(lang, "scan.approve")}</button>
+                      <button className="ghost" onClick={() => approveLogin(false)} disabled={approving}>{tr(lang, "scan.deny")}</button>
+                    </div>
+                  </div>
+                )}
+                {scanMsg && <p className="muted" style={{ marginTop: 10 }}>{scanMsg}</p>}
               </div>
               {devices.length === 0 ? (
                 <div className="card"><p className="muted">{tr(lang, "dv.empty")}</p></div>
