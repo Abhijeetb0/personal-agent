@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { supabaseBrowser } from "../../lib/supabase-browser";
+import { deviceId, deviceLabel } from "../../lib/device";
 import { Brand, StatusPill, StatCard, EmptyState, SectionHeader, Skeleton, type ConnTone } from "../components/ui";
 import { useLang, LangToggle } from "../components/lang";
 import { tr } from "../../lib/i18n";
@@ -13,7 +14,8 @@ type Msg = { body: string; reply: string | null; created_at: string };
 type Contest = { name: string; startIST: string } | null;
 type ContestFull = { name: string; startAt: string; startIST: string; url: string };
 
-type Tab = "overview" | "connect" | "contests" | "rems" | "mem" | "chat" | "files";
+type Tab = "overview" | "connect" | "contests" | "rems" | "mem" | "chat" | "files" | "devices";
+type Device = { id: string; label: string; ip: string; revoked: boolean; last_seen: string; created_at: string };
 
 const TABS: { id: Tab; icon: string }[] = [
   { id: "overview", icon: "📊" },
@@ -23,6 +25,7 @@ const TABS: { id: Tab; icon: string }[] = [
   { id: "mem", icon: "🧠" },
   { id: "chat", icon: "💬" },
   { id: "files", icon: "📁" },
+  { id: "devices", icon: "📱" },
 ];
 
 const FILE_BUCKET = "user-files";
@@ -77,6 +80,14 @@ export default function Dashboard() {
   const [chatSending, setChatSending] = useState(false);
   // mirror toggle
   const [mirror, setMirror] = useState(true);
+  // QR login scanner + devices
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [scanning, setScanning] = useState(false);
+  const [scanMsg, setScanMsg] = useState("");
+  const [scanned, setScanned] = useState<{ id: string; label: string; ip: string } | null>(null);
+  const [approving, setApproving] = useState(false);
+  const scannerRef = useRef<any>(null);
+  const lastBeat = useRef(0);
   // #files
   const [files, setFiles] = useState<WFile[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -86,6 +97,8 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (tab === "files") loadFiles();
+    if (tab === "devices") loadDevices();
+    if (tab !== "connect") stopScan();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
   const chatBoxRef = useRef<HTMLDivElement | null>(null);
@@ -167,6 +180,21 @@ export default function Dashboard() {
   }
 
   async function load() {
+    // Device heartbeat (5-min throttle) + remote-logout check
+    try {
+      if (Date.now() - lastBeat.current > 5 * 60 * 1000) {
+        lastBeat.current = Date.now();
+        const b = await fetch("/api/devices", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: deviceId(), label: deviceLabel() }),
+        });
+        if (b.status === 403) {
+          await supabaseBrowser().auth.signOut();
+          window.location.href = "/login";
+          return;
+        }
+      }
+    } catch {}
     try {
       const s = await fetch("/api/agent-status");
       if (s.ok) setStatus(await s.json());
@@ -216,13 +244,128 @@ export default function Dashboard() {
       }
     }).catch(() => { window.location.href = "/login"; });
     const t = setInterval(load, 8000);
-    return () => clearInterval(t);
+    return () => { clearInterval(t); stopScan(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function logout() {
+    try {
+      const own = deviceId();
+      await fetch("/api/devices", {
+        method: "DELETE", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: own, ownId: own }),
+      });
+    } catch {}
     await supabaseBrowser().auth.signOut();
     window.location.href = "/login";
+  }
+
+  // ---- QR-login scanner (logged-in phone se naye device ka QR scan) ----
+  async function loadDevices() {
+    try {
+      const r = await fetch("/api/devices");
+      if (r.ok) setDevices((await r.json()).devices || []);
+    } catch {}
+  }
+
+  async function revokeDevice(id: string) {
+    if (!window.confirm("Is device se logout karna hai?")) return;
+    try {
+      await fetch("/api/devices", {
+        method: "DELETE", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, ownId: deviceId() }),
+      });
+      flash("📱 Device logout ho gaya");
+      loadDevices();
+    } catch {
+      flash("Fail — fir try karo");
+    }
+  }
+
+  async function stopScan() {
+    try {
+      if (scannerRef.current) {
+        await scannerRef.current.stop().catch(() => {});
+        scannerRef.current.clear?.();
+      }
+    } catch {}
+    scannerRef.current = null;
+    setScanning(false);
+  }
+
+  async function startScan() {
+    setScanMsg("");
+    setScanned(null);
+    setScanning(true);
+    try {
+      const { Html5Qrcode } = await import("html5-qrcode");
+      const h = new Html5Qrcode("qr-scan-region");
+      scannerRef.current = h;
+      await h.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: 250 },
+        (text: string) => onScan(text),
+        () => {}
+      );
+    } catch {
+      setScanMsg(tr(lang, "scan.camFail"));
+    }
+  }
+
+  async function scanFromFile(f: File | undefined) {
+    if (!f) return;
+    setScanMsg("");
+    try {
+      const { Html5Qrcode } = await import("html5-qrcode");
+      const h = scannerRef.current || new Html5Qrcode("qr-scan-region");
+      const text = await h.scanFile(f, true);
+      onScan(String(text));
+    } catch {
+      setScanMsg(tr(lang, "scan.noQr"));
+    }
+  }
+
+  function parseTicket(text: string): string | null {
+    try {
+      const o = JSON.parse(text);
+      if (o && o.v === 1 && typeof o.ticket === "string" && o.ticket.length > 10) return o.ticket;
+    } catch {}
+    return null;
+  }
+
+  async function onScan(text: string) {
+    const id = parseTicket(text);
+    if (!id) { setScanMsg(tr(lang, "scan.noQr")); return; }
+    await stopScan();
+    setScanMsg(tr(lang, "scan.check"));
+    try {
+      const r = await fetch(`/api/login-qr/ticket?id=${id}`);
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || "fail");
+      if (j.status !== "pending") { setScanMsg(tr(lang, "scan.stale")); return; }
+      setScanned({ id, label: j.device_label || "?", ip: j.ip || "?" });
+      setScanMsg("");
+    } catch {
+      setScanMsg(tr(lang, "scan.checkFail"));
+    }
+  }
+
+  async function approveLogin(ok: boolean) {
+    if (!scanned || approving) return;
+    setApproving(true);
+    try {
+      const r = await fetch(ok ? "/api/login-qr/approve" : "/api/login-qr/deny", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: scanned.id }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "fail");
+      setScanned(null);
+      flash(ok ? tr(lang, "scan.approved") : tr(lang, "scan.denied"));
+    } catch (e: any) {
+      setScanMsg(e.message || "fail");
+    }
+    setApproving(false);
   }
 
   async function saveOwner() {
@@ -761,6 +904,37 @@ export default function Dashboard() {
                   <b>{mirror ? tr(lang, "mirror.on") : tr(lang, "mirror.off")}</b>
                 </div>
               </div>
+
+              <div className="card">
+                <h2>📷 {tr(lang, "scan.title")}</h2>
+                <p className="desc">{tr(lang, "scan.desc")}</p>
+                {!scanning && !scanned && (
+                  <button onClick={startScan}>{tr(lang, "scan.start")}</button>
+                )}
+                {scanning && (
+                  <>
+                    <div id="qr-scan-region" style={{ width: "100%", maxWidth: 320 }} />
+                    <div className="row" style={{ marginTop: 10 }}>
+                      <label className="ghost sm" style={{ cursor: "pointer" }}>
+                        {tr(lang, "scan.gallery")}
+                        <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => scanFromFile(e.currentTarget.files?.[0])} />
+                      </label>
+                      <button className="ghost sm" onClick={stopScan}>{tr(lang, "btn.cancel")}</button>
+                    </div>
+                  </>
+                )}
+                {scanned && (
+                  <div className="card" style={{ marginTop: 12 }}>
+                    <h2>{tr(lang, "scan.approveQ")}</h2>
+                    <p className="desc">📱 {scanned.label}{scanned.ip ? ` • ${scanned.ip}` : ""}</p>
+                    <div className="row">
+                      <button onClick={() => approveLogin(true)} disabled={approving}>{approving ? "…" : tr(lang, "scan.approve")}</button>
+                      <button className="ghost" onClick={() => approveLogin(false)} disabled={approving}>{tr(lang, "scan.deny")}</button>
+                    </div>
+                  </div>
+                )}
+                {scanMsg && <p className="muted" style={{ marginTop: 10 }}>{scanMsg}</p>}
+              </div>
             </>
           )}
 
@@ -946,8 +1120,7 @@ export default function Dashboard() {
               <div className="page-head">
                 <h1>{tr(lang, "fi.title")}</h1>
                 <p>{tr(lang, "fi.sub")}</p>
-              </div>
-              <div className="card">
+              </div>              <div className="card">
                 <h2>📤 {tr(lang, "fi.pick")} <span className="muted">(max 50MB)</span></h2>
                 <div className="row" style={{ marginTop: 12 }}>
                   <input ref={fileInputRef} type="file" onChange={() => { setUpErr(""); setUpPct(0); }} disabled={uploading} />
@@ -980,6 +1153,38 @@ export default function Dashboard() {
                       <small>{fmtSize(f.size)}{f.created ? ` · ${new Date(f.created).toLocaleString("en-IN")}` : ""}</small>
                     </li>
                   ))}
+                </ul>
+              )}
+            </>
+          )}
+
+          {tab === "devices" && (
+            <>
+              <div className="page-head">
+                <h1>{tr(lang, "dv.title")}</h1>
+                <p>{tr(lang, "dv.sub")}</p>
+              </div>
+              {devices.length === 0 ? (
+                <div className="card"><p className="muted">{tr(lang, "dv.empty")}</p></div>
+              ) : (
+                <ul className="list">
+                  {devices.map((d) => {
+                    const mine = (() => { try { return d.id === localStorage.getItem("pa-device-id"); } catch { return false; } })();
+                    return (
+                      <li key={d.id}>
+                        <div className="li-head file-row">
+                          <span className="file-icon">📱</span>
+                          <b>{d.label || "Device"}{mine ? ` (${tr(lang, "dv.this")})` : ""}</b>
+                          <span className="file-actions">
+                            {!mine && !d.revoked && (
+                              <a href="#" className="link-danger" onClick={(e) => { e.preventDefault(); revokeDevice(d.id); }}>{tr(lang, "dv.logout")}</a>
+                            )}
+                          </span>
+                        </div>
+                        <small>{d.ip ? `${d.ip} · ` : ""}{relTime(d.last_seen)}{d.revoked ? ` · ${tr(lang, "dv.revoked")}` : ""}</small>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </>
