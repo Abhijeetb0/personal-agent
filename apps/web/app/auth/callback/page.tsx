@@ -41,8 +41,34 @@ function CallbackInner() {
             return;
           }
         } else {
-          // #hash tokens (implicit) ya ?code= — client khud URL se session uthata hai.
-          // Thoda wait taaki detectSessionInUrl process ho jaye.
+          // #hash tokens (implicit): library ka PKCE-default auto-detect reject kar
+          // sakta hai — isliye tokens nikaal ke server pe session banao (sure-shot).
+          const hash = typeof window !== "undefined" ? window.location.hash : "";
+          const hp = new URLSearchParams(hash.replace(/^#/, ""));
+          const hErr = hp.get("error");
+          if (hErr) {
+            fail(`hash-error | ${hErr} | ${hp.get("error_description") || "no-desc"}`);
+            return;
+          }
+          const access_token = hp.get("access_token");
+          const refresh_token = hp.get("refresh_token");
+          if (access_token && refresh_token) {
+            const r = await fetch("/api/auth/hash-session", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ access_token, refresh_token }),
+            });
+            const j = await r.json().catch(() => ({} as any));
+            if (!r.ok) {
+              fail(`hash-session-fail | ${j.error || "unknown"}`);
+              return;
+            }
+            if (!dead) {
+              setMsg("Login ho gaya ✅ — dashboard khul raha…");
+              window.location.href = "/dashboard";
+              return;
+            }
+          }
+          // Fallback: library auto-detect (purane versions / ?code= case)
           let session = null;
           for (let i = 0; i < 10; i++) {
             const { data } = await sb.auth.getSession();
