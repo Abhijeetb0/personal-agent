@@ -6,7 +6,7 @@ import * as store from "./store.js";
 vi.mock("./baileys.js", () => ({
   getSession: vi.fn(),
   sendWhatsAppMessage: vi.fn(),
-  isLive: (s: any) => s?.status === "connected" && !!(s as any)?.sock && (s as any)?.sock?.ws?.readyState === 1,
+  isLive: (s: any) => s?.status === "connected" && !!(s as any)?.sock && (s as any)?.sock?.ws?.isOpen === true,
   resolveOutgoingJid: (_s: any, owner: string) => `${owner}@s.whatsapp.net`,
 }));
 
@@ -70,7 +70,7 @@ describe("mirror to WhatsApp", () => {
   it("mirror on + connected + owner ho to WhatsApp pe ek combined bubble jata hai", async () => {
     vi.spyOn(store, "getOwnerNumber").mockResolvedValue("911234567890");
     vi.spyOn(store, "getWebMirror").mockResolvedValue(true);
-    vi.mocked(getSession).mockReturnValue({ status: "connected", sock: { ws: { readyState: 1 } } } as any);
+    vi.mocked(getSession).mockReturnValue({ status: "connected", sock: { ws: { isOpen: true } } } as any);
     const r = await webChatReply("test-user", "time kya hai");
     expect(vi.mocked(sendWhatsAppMessage)).toHaveBeenCalledOnce();
     const [uid, jid, text] = vi.mocked(sendWhatsAppMessage).mock.calls[0]!;
@@ -84,7 +84,7 @@ describe("mirror to WhatsApp", () => {
   it("mirror off ho to WhatsApp pe nahi jata, web reply ok", async () => {
     vi.spyOn(store, "getOwnerNumber").mockResolvedValue("911234567890");
     vi.spyOn(store, "getWebMirror").mockResolvedValue(false);
-    vi.mocked(getSession).mockReturnValue({ status: "connected", sock: { ws: { readyState: 1 } } } as any);
+    vi.mocked(getSession).mockReturnValue({ status: "connected", sock: { ws: { isOpen: true } } } as any);
     const r = await webChatReply("test-user", "time kya hai");
     expect(vi.mocked(sendWhatsAppMessage)).not.toHaveBeenCalled();
     expect(r.length).toBeGreaterThan(0);

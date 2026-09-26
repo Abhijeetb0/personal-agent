@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   computeReconnectDelay, RECONNECT_DELAYS, getSession,
-  requestReconnect, isQrTimeout, MAX_QR_TIMEOUTS,
+  requestReconnect, isQrTimeout, MAX_QR_TIMEOUTS, wsOpen, isLive,
 } from "./baileys.js";
 import { shouldSkip } from "./watchdog.js";
 
@@ -26,7 +26,7 @@ describe("watchdog shouldSkip", () => {
   it("live (connected + WS open) ko skip karta hai", () => {
     const s = getSession("test-connected");
     s.status = "connected";
-    (s as any).sock = { ws: { readyState: 1 } };
+    (s as any).sock = { ws: { isOpen: true } };
     s.needsScan = false;
     expect(shouldSkip("test-connected").skip).toBe(true);
   });
@@ -34,7 +34,7 @@ describe("watchdog shouldSkip", () => {
   it("half-open (connected par WS dead) ko skip nahi karta — reconnect allowed", () => {
     const s = getSession("test-halfopen");
     s.status = "connected";
-    (s as any).sock = { ws: { readyState: 0 } };
+    (s as any).sock = { ws: { isOpen: false } };
     s.needsScan = false;
     s.nextRetryAt = 0;
     s.lastClose = null;
@@ -91,6 +91,40 @@ describe("watchdog shouldSkip", () => {
     const out = shouldSkip("test-qrwait");
     expect(out.skip).toBe(true);
     expect(["qr-grace", "qr-wait"]).toContain(out.reason);
+  });
+});
+
+describe("wsOpen / isLive (Baileys v7: ws.isOpen, readyState nahi)", () => {
+  it("isOpen:true + connected = live", () => {
+    const s = getSession("test-live-open");
+    s.status = "connected";
+    (s as any).sock = { ws: { isOpen: true } };
+    expect(wsOpen(s)).toBe(true);
+    expect(isLive(s)).toBe(true);
+  });
+
+  it("isOpen:false + connected = dead (half-open)", () => {
+    const s = getSession("test-live-shut");
+    s.status = "connected";
+    (s as any).sock = { ws: { isOpen: false } };
+    expect(wsOpen(s)).toBe(false);
+    expect(isLive(s)).toBe(false);
+  });
+
+  it("sock nahi = dead", () => {
+    const s = getSession("test-live-nosock");
+    s.status = "connected";
+    (s as any).sock = null;
+    expect(wsOpen(s)).toBe(false);
+    expect(isLive(s)).toBe(false);
+  });
+
+  it("unknown ws shape = status pe trust (fail-open)", () => {
+    const s = getSession("test-live-unknown");
+    s.status = "connected";
+    (s as any).sock = { ws: {} };
+    expect(wsOpen(s)).toBe(true);
+    expect(isLive(s)).toBe(true);
   });
 });
 

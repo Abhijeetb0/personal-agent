@@ -66,9 +66,18 @@ export function allSessions(): UserSession[] {
 // asal Baileys WS mar chuka ho (Render hibernate) to use live mat mano.
 // Scheduler/watchdog/wake sab isi pe faisla karenge taaki dead socket
 // "Connected" ban ke auto-heal se bach na paye.
+// NOTE: Baileys v7 me sock.ws WebSocketClient wrapper hai — uspe .readyState
+// NAHI hota, sirf .isOpen getter hota hai. readyState check hamesha false
+// deta tha (saara outbound block ho gaya tha), isliye isOpen use karo.
 export function wsOpen(s: UserSession): boolean {
   try {
-    return !!s.sock && (s.sock as any)?.ws?.readyState === 1;
+    if (!s.sock) return false;
+    const ws = (s.sock as any)?.ws;
+    if (ws && typeof ws.isOpen === "boolean") return ws.isOpen;
+    // Unknown Baileys shape: status pe trust karo (fail-open) + warn,
+    // taaki future wrapper-change pe outbound dobara block na ho.
+    logger.warn("[wa] ws.isOpen nahi mila — status pe trust kar rahe");
+    return s.status === "connected";
   } catch {
     return false;
   }
@@ -237,8 +246,7 @@ export async function requestPairingCode(userId: string, number?: string): Promi
   const deadline = Date.now() + 20000;
   while (Date.now() < deadline) {
     if ((s.status as string) === "connected") throw new Error("Pehle se connected hai");
-    const open = (s.sock as any)?.ws?.readyState === 1;
-    if (s.sock && open) break;
+    if (s.sock && wsOpen(s)) break;
     await new Promise((r) => setTimeout(r, 1000));
   }
   if (!s.sock) throw new Error("Socket ready nahi — 10 sec ruk ke retry karo");
